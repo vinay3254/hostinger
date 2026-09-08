@@ -82,12 +82,12 @@ pub struct BuildResult { pub artifact_path: PathBuf, pub cache_key: String, pub 
 
 ### Task 4: Implement the worker loop and API integration
 
-- [ ] **Step 1: Write failing worker tests** for success, retryable failure, terminal failure, lease renewal, cancellation, and shutdown.
-- [ ] **Step 2: Implement `BuildWorker::run_once`**: claim, renew, checkout, detect, execute, persist logs/artifact, publish events, and ack.
-- [ ] **Step 3: Classify errors** into retryable infrastructure failures, user build failures, cancellation, and invalid configuration.
-- [ ] **Step 4: Add `build-worker` binary** with Redis/Postgres/config validation and graceful SIGTERM shutdown.
-- [ ] **Step 5: Change `POST /deployments` and webhook consumers** to create a deployment, enqueue a job, return 202, and let the worker update status.
-- [ ] **Step 6: Run Rust tests and a local API/worker fixture**; commit `feat: run deployments through build workers`.
+- [x] **Step 1: Write failing worker tests** for success, retryable failure, terminal failure, lease renewal, cancellation, and shutdown.
+- [x] **Step 2: Implement `BuildWorker::run_once`**: claim, renew, checkout, detect, execute, persist logs/artifact, publish events, and ack.
+- [x] **Step 3: Classify errors** into retryable infrastructure failures, user build failures, cancellation, and invalid configuration.
+- [x] **Step 4: Add `build-worker` binary** with Redis/Postgres/config validation and graceful SIGTERM shutdown.
+- [x] **Step 5: Change `POST /deployments` and webhook consumers** to create a deployment, enqueue a job, return 202, and let the worker update status.
+- [x] **Step 6: Run Rust tests and a local API/worker fixture**; commit `feat: run deployments through build workers`.
 
 ### Task 5: Add dashboard queue/build states
 
