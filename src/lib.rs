@@ -17,5 +17,6 @@ pub mod source_checkout;
 pub mod source_events;
 pub mod store;
 pub mod webhooks;
+pub mod worker;
 
 pub type Result<T> = anyhow::Result<T>;
