@@ -192,6 +192,32 @@ export const AppShell: React.FC<AppShellProps> = ({ children, currentProjectId }
           >
             Environment
           </Link>
+          <Link
+            href={`/projects/${currentProjectId}/settings/source`}
+            style={{
+              fontSize: '13px',
+              fontWeight: pathname.includes('/settings/source') ? 600 : 400,
+              color: pathname.includes('/settings/source') ? '#111827' : '#6b7280',
+              borderBottom: pathname.includes('/settings/source') ? '2px solid #111827' : 'none',
+              padding: '12px 0',
+              textDecoration: 'none',
+            }}
+          >
+            Source
+          </Link>
+          <Link
+            href={`/projects/${currentProjectId}/previews`}
+            style={{
+              fontSize: '13px',
+              fontWeight: pathname.includes('/previews') ? 600 : 400,
+              color: pathname.includes('/previews') ? '#111827' : '#6b7280',
+              borderBottom: pathname.includes('/previews') ? '2px solid #111827' : 'none',
+              padding: '12px 0',
+              textDecoration: 'none',
+            }}
+          >
+            Previews
+          </Link>
         </div>
       )}
 
