@@ -1,0 +1,2 @@
+ALTER TABLE build_jobs ADD COLUMN IF NOT EXISTS commit_sha TEXT;
+ALTER TABLE deployments ADD COLUMN IF NOT EXISTS commit_sha TEXT;
