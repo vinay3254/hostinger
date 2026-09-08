@@ -1,5 +1,7 @@
 pub mod api;
+pub mod artifacts;
 pub mod auth;
+pub mod build_executor;
 pub mod builder;
 pub mod config;
 pub mod db;
