@@ -11,6 +11,7 @@ fn project() -> Project {
     Project {
         id: Uuid::new_v4(),
         name: "site".into(),
+        user_id: None,
         source_dir: PathBuf::from("/tmp/site"),
         base_image: PathBuf::from("/tmp/base.tar.gz"),
         server_command: vec![
