@@ -147,6 +147,100 @@ test.describe('Dashboard E2E Workflow with Mocked API', () => {
         }),
       });
     });
+
+    // Mock /v1/providers/github/repositories
+    await page.route('**/v1/providers/github/repositories', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'repo-e2e',
+            connection_id: 'conn-1',
+            external_id: '12345',
+            full_name: 'test-org/test-repo',
+            clone_url: 'https://github.com/test-org/test-repo.git',
+            default_branch: 'main',
+            synced_at: new Date().toISOString(),
+          },
+        ]),
+      });
+    });
+
+    // Mock /v1/projects/proj-1234/source
+    let projectSource: any = {
+      repository: null,
+      provider: null,
+      target_branch: 'main',
+      webhook_url: null,
+      has_webhook_secret: false,
+      last_delivery_at: null,
+    };
+
+    await page.route('**/v1/projects/proj-1234/source', async (route) => {
+      if (route.request().method() === 'POST') {
+        const body = JSON.parse(route.request().postData() || '{}');
+        projectSource = {
+          repository: {
+            id: body.repository_id || 'repo-e2e',
+            connection_id: 'conn-1',
+            external_id: '12345',
+            full_name: 'test-org/test-repo',
+            clone_url: 'https://github.com/test-org/test-repo.git',
+            default_branch: 'main',
+            synced_at: new Date().toISOString(),
+          },
+          provider: 'github',
+          target_branch: body.target_branch || 'main',
+          webhook_url: '/v1/webhooks/github/proj-1234',
+          has_webhook_secret: true,
+          last_delivery_at: null,
+        };
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(projectSource),
+        });
+      } else if (route.request().method() === 'DELETE') {
+        projectSource = {
+          repository: null,
+          provider: null,
+          target_branch: 'main',
+          webhook_url: null,
+          has_webhook_secret: false,
+          last_delivery_at: null,
+        };
+        await route.fulfill({ status: 204 });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(projectSource),
+        });
+      }
+    });
+
+    // Mock /v1/projects/proj-1234/source/events
+    await page.route('**/v1/projects/proj-1234/source/events', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'ev-1',
+            project_id: 'proj-1234',
+            provider: 'github',
+            delivery_id: 'del-12345678',
+            kind: 'push',
+            commit_sha: 'a1b2c3d4e5f6',
+            branch: 'main',
+            pull_request: null,
+            idempotency_key: 'github:del-12345678:a1b2c3d4e5f6',
+            created_at: new Date().toISOString(),
+          },
+        ]),
+      });
+    });
   });
 
   test('user logs in and views dashboard', async ({ page }) => {
@@ -175,5 +269,22 @@ test.describe('Dashboard E2E Workflow with Mocked API', () => {
     await expect(page.getByRole('heading', { name: 'dep-1234' })).toBeVisible();
     await expect(page.getByText('http://127.0.0.1:43123')).toBeVisible();
     await expect(page.getByText(/Ready and serving HTTP/)).toBeVisible();
+  });
+
+  test('user configures git source and views webhook settings', async ({ page }) => {
+    await page.goto('/projects/proj-1234/settings/source');
+    await expect(page.getByRole('heading', { name: 'Source Settings' })).toBeVisible();
+
+    // Link repository
+    await page.click('button:has-text("Link Repository")');
+    await expect(page.getByText('test-org/test-repo')).toBeVisible();
+    await expect(page.getByText('Active (Configured)')).toBeVisible();
+  });
+
+  test('user views previews and source events', async ({ page }) => {
+    await page.goto('/projects/proj-1234/previews');
+    await expect(page.getByRole('heading', { name: 'Pull Request Previews & Source Events' })).toBeVisible();
+    await expect(page.getByText('Push')).toBeVisible();
+    await expect(page.getByText('a1b2c3d4')).toBeVisible();
   });
 });
