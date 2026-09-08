@@ -289,6 +289,110 @@ impl<'a> ProjectRepository<'a> {
             .with_context(|| format!("failed to update active deployment for project {id}"))?;
         Ok(())
     }
+
+    pub async fn get_project_source(&mut self, project_id: Uuid) -> Result<ProjectSourceDetails> {
+        let query = r#"
+            SELECT p.repository_id, p.target_branch, p.webhook_secret,
+                   r.id as repo_id, r.connection_id, r.external_id, r.full_name, r.clone_url, r.default_branch, r.synced_at,
+                   c.provider
+            FROM projects p
+            LEFT JOIN provider_repositories r ON p.repository_id = r.id
+            LEFT JOIN provider_connections c ON r.connection_id = c.id
+            WHERE p.id = $1
+        "#;
+        let q = sqlx::query(query).bind(project_id);
+        let row = self
+            .executor
+            .fetch_optional(q)
+            .await
+            .context("failed to query project source")?
+            .ok_or_else(|| anyhow::anyhow!("project not found: {project_id}"))?;
+
+        let repo_id: Option<Uuid> = row.get("repo_id");
+        let repository = repo_id.map(|id| ProviderRepositoryRecord {
+            id,
+            connection_id: row.get("connection_id"),
+            external_id: row.get("external_id"),
+            full_name: row.get("full_name"),
+            clone_url: row.get("clone_url"),
+            default_branch: row.get("default_branch"),
+            synced_at: row.get("synced_at"),
+        });
+
+        let provider: Option<String> = row.get("provider");
+        let target_branch: Option<String> = row.get("target_branch");
+        let webhook_secret: Option<String> = row.get("webhook_secret");
+
+        let delivery_query = "SELECT created_at FROM provider_deliveries WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1";
+        let last_del_row = self
+            .executor
+            .fetch_optional(sqlx::query(delivery_query).bind(project_id))
+            .await
+            .context("failed to query last delivery")?;
+        let last_delivery_at: Option<OffsetDateTime> = last_del_row.map(|r| r.get("created_at"));
+
+        let webhook_url = provider
+            .as_ref()
+            .map(|p| format!("/v1/webhooks/{p}/{project_id}"));
+
+        Ok(ProjectSourceDetails {
+            repository,
+            provider,
+            target_branch,
+            webhook_url,
+            has_webhook_secret: webhook_secret.is_some(),
+            last_delivery_at: last_delivery_at.map(|t| {
+                t.format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_default()
+            }),
+        })
+    }
+
+    pub async fn set_project_source(
+        &mut self,
+        project_id: Uuid,
+        repository_id: Uuid,
+        target_branch: &str,
+        default_secret: &str,
+    ) -> Result<()> {
+        let query = r#"
+            UPDATE projects
+            SET repository_id = $2,
+                target_branch = $3,
+                webhook_secret = COALESCE(webhook_secret, $4)
+            WHERE id = $1
+        "#;
+        let q = sqlx::query(query)
+            .bind(project_id)
+            .bind(repository_id)
+            .bind(target_branch)
+            .bind(default_secret);
+        self.executor
+            .execute(q)
+            .await
+            .context("failed to update project source")?;
+        Ok(())
+    }
+
+    pub async fn disconnect_project_source(&mut self, project_id: Uuid) -> Result<()> {
+        let query = "UPDATE projects SET repository_id = NULL WHERE id = $1";
+        let q = sqlx::query(query).bind(project_id);
+        self.executor
+            .execute(q)
+            .await
+            .context("failed to disconnect project source")?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProjectSourceDetails {
+    pub repository: Option<ProviderRepositoryRecord>,
+    pub provider: Option<String>,
+    pub target_branch: Option<String>,
+    pub webhook_url: Option<String>,
+    pub has_webhook_secret: bool,
+    pub last_delivery_at: Option<String>,
 }
 
 pub struct DeploymentRepository<'a> {
@@ -519,6 +623,256 @@ impl<'a> AuditRepository<'a> {
                 target_id: row.get("target_id"),
                 metadata: row.get("metadata"),
                 occurred_at: row.get("occurred_at"),
+            });
+        }
+        Ok(list)
+    }
+}
+
+use crate::providers::{Provider, RemoteRepository};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderConnectionRecord {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub provider: Provider,
+    pub external_user_id: String,
+    pub access_token_encrypted: String,
+    pub refresh_token_encrypted: Option<String>,
+    pub expires_at: Option<OffsetDateTime>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpsertConnectionInput {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub provider: Provider,
+    pub external_user_id: String,
+    pub access_token_encrypted: String,
+    pub refresh_token_encrypted: Option<String>,
+    pub expires_at: Option<OffsetDateTime>,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProviderRepositoryRecord {
+    pub id: Uuid,
+    pub connection_id: Uuid,
+    pub external_id: String,
+    pub full_name: String,
+    pub clone_url: String,
+    pub default_branch: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub synced_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OAuthStateRecord {
+    pub state: String,
+    pub user_id: Uuid,
+    pub provider: Provider,
+    pub redirect_url: Option<String>,
+    pub expires_at: OffsetDateTime,
+    pub created_at: OffsetDateTime,
+}
+
+pub struct ProviderRepository<'a> {
+    executor: DbExecutor<'a>,
+}
+
+impl<'a> ProviderRepository<'a> {
+    pub fn new(executor: DbExecutor<'a>) -> Self {
+        Self { executor }
+    }
+
+    pub async fn save_oauth_state(
+        &mut self,
+        state: &str,
+        user_id: Uuid,
+        provider: Provider,
+        redirect_url: Option<&str>,
+        expires_at: OffsetDateTime,
+        created_at: OffsetDateTime,
+    ) -> Result<()> {
+        let query = "INSERT INTO oauth_states (state, user_id, provider, redirect_url, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6)";
+        let q = sqlx::query(query)
+            .bind(state)
+            .bind(user_id)
+            .bind(provider.to_string())
+            .bind(redirect_url)
+            .bind(expires_at)
+            .bind(created_at);
+        self.executor
+            .execute(q)
+            .await
+            .context("failed to insert oauth state")?;
+        Ok(())
+    }
+
+    pub async fn consume_oauth_state(&mut self, state: &str) -> Result<Option<OAuthStateRecord>> {
+        let query = "DELETE FROM oauth_states WHERE state = $1 AND expires_at > NOW() RETURNING state, user_id, provider, redirect_url, expires_at, created_at";
+        let q = sqlx::query(query).bind(state);
+        let row_opt = self
+            .executor
+            .fetch_optional(q)
+            .await
+            .context("failed to consume oauth state")?;
+        if let Some(row) = row_opt {
+            let provider_str: String = row.get("provider");
+            let provider = provider_str
+                .parse()
+                .context("invalid provider in oauth state")?;
+            Ok(Some(OAuthStateRecord {
+                state: row.get("state"),
+                user_id: row.get("user_id"),
+                provider,
+                redirect_url: row.get("redirect_url"),
+                expires_at: row.get("expires_at"),
+                created_at: row.get("created_at"),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn upsert_connection(
+        &mut self,
+        input: UpsertConnectionInput,
+    ) -> Result<ProviderConnectionRecord> {
+        let query = r#"
+            INSERT INTO provider_connections (id, user_id, provider, external_user_id, access_token_encrypted, refresh_token_encrypted, expires_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (user_id, provider) DO UPDATE SET
+                external_user_id = EXCLUDED.external_user_id,
+                access_token_encrypted = EXCLUDED.access_token_encrypted,
+                refresh_token_encrypted = EXCLUDED.refresh_token_encrypted,
+                expires_at = EXCLUDED.expires_at,
+                updated_at = EXCLUDED.updated_at
+            RETURNING id, user_id, provider, external_user_id, access_token_encrypted, refresh_token_encrypted, expires_at, created_at, updated_at
+        "#;
+        let q = sqlx::query(query)
+            .bind(input.id)
+            .bind(input.user_id)
+            .bind(input.provider.to_string())
+            .bind(input.external_user_id)
+            .bind(input.access_token_encrypted)
+            .bind(input.refresh_token_encrypted)
+            .bind(input.expires_at)
+            .bind(input.created_at)
+            .bind(input.updated_at);
+        let row = self
+            .executor
+            .fetch_optional(q)
+            .await
+            .context("failed to upsert provider connection")?
+            .ok_or_else(|| anyhow::anyhow!("failed to return upserted provider connection"))?;
+        let provider_str: String = row.get("provider");
+        Ok(ProviderConnectionRecord {
+            id: row.get("id"),
+            user_id: row.get("user_id"),
+            provider: provider_str.parse()?,
+            external_user_id: row.get("external_user_id"),
+            access_token_encrypted: row.get("access_token_encrypted"),
+            refresh_token_encrypted: row.get("refresh_token_encrypted"),
+            expires_at: row.get("expires_at"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
+    }
+
+    pub async fn get_connection(
+        &mut self,
+        user_id: Uuid,
+        provider: Provider,
+    ) -> Result<Option<ProviderConnectionRecord>> {
+        let query = "SELECT id, user_id, provider, external_user_id, access_token_encrypted, refresh_token_encrypted, expires_at, created_at, updated_at FROM provider_connections WHERE user_id = $1 AND provider = $2";
+        let q = sqlx::query(query).bind(user_id).bind(provider.to_string());
+        let row_opt = self
+            .executor
+            .fetch_optional(q)
+            .await
+            .context("failed to get provider connection")?;
+        if let Some(row) = row_opt {
+            let provider_str: String = row.get("provider");
+            Ok(Some(ProviderConnectionRecord {
+                id: row.get("id"),
+                user_id: row.get("user_id"),
+                provider: provider_str.parse()?,
+                external_user_id: row.get("external_user_id"),
+                access_token_encrypted: row.get("access_token_encrypted"),
+                refresh_token_encrypted: row.get("refresh_token_encrypted"),
+                expires_at: row.get("expires_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn save_repositories(
+        &mut self,
+        connection_id: Uuid,
+        repos: &[RemoteRepository],
+        synced_at: OffsetDateTime,
+    ) -> Result<()> {
+        for repo in repos {
+            let query = r#"
+                INSERT INTO provider_repositories (id, connection_id, external_id, full_name, clone_url, default_branch, synced_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (connection_id, external_id) DO UPDATE SET
+                    full_name = EXCLUDED.full_name,
+                    clone_url = EXCLUDED.clone_url,
+                    default_branch = EXCLUDED.default_branch,
+                    synced_at = EXCLUDED.synced_at
+            "#;
+            let q = sqlx::query(query)
+                .bind(Uuid::new_v4())
+                .bind(connection_id)
+                .bind(&repo.external_id)
+                .bind(&repo.full_name)
+                .bind(repo.clone_url.as_str())
+                .bind(&repo.default_branch)
+                .bind(synced_at);
+            self.executor
+                .execute(q)
+                .await
+                .context("failed to save repository")?;
+        }
+        Ok(())
+    }
+
+    pub async fn list_repositories(
+        &mut self,
+        user_id: Uuid,
+        provider: Provider,
+    ) -> Result<Vec<ProviderRepositoryRecord>> {
+        let query = r#"
+            SELECT r.id, r.connection_id, r.external_id, r.full_name, r.clone_url, r.default_branch, r.synced_at
+            FROM provider_repositories r
+            JOIN provider_connections c ON r.connection_id = c.id
+            WHERE c.user_id = $1 AND c.provider = $2
+            ORDER BY r.full_name ASC
+        "#;
+        let q = sqlx::query(query).bind(user_id).bind(provider.to_string());
+        let rows = self
+            .executor
+            .fetch_all(q)
+            .await
+            .context("failed to list provider repositories")?;
+        let mut list = Vec::new();
+        for row in rows {
+            list.push(ProviderRepositoryRecord {
+                id: row.get("id"),
+                connection_id: row.get("connection_id"),
+                external_id: row.get("external_id"),
+                full_name: row.get("full_name"),
+                clone_url: row.get("clone_url"),
+                default_branch: row.get("default_branch"),
+                synced_at: row.get("synced_at"),
             });
         }
         Ok(list)
