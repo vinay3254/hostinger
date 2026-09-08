@@ -137,5 +137,27 @@ pub async fn handle_webhook(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // If queue is configured, enqueue build job and return 202 ACCEPTED
+    if let Some(queue) = &state.queue {
+        let priority = match source_event.kind {
+            crate::providers::SourceEventKind::Push => crate::queue::BuildPriority::Production,
+            _ => crate::queue::BuildPriority::Preview,
+        };
+        let deployment_id = Uuid::new_v4();
+        let _ = sqlx::query(
+            "INSERT INTO deployments (id, project_id, framework, status, created_at, commit_sha)
+             VALUES ($1, $2, 'static', 'queued', $3, $4)",
+        )
+        .bind(deployment_id)
+        .bind(project_id)
+        .bind(now)
+        .bind(&source_event.commit_sha)
+        .execute(db.pool())
+        .await;
+
+        let _ = queue.enqueue_job(deployment_id, project_id, priority).await;
+        return Ok(StatusCode::ACCEPTED);
+    }
+
     Ok(StatusCode::OK)
 }
