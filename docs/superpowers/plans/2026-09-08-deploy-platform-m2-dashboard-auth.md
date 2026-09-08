@@ -56,13 +56,13 @@
 - `ProjectRepository`, `DeploymentRepository`, `UserRepository`, `AuditRepository`
 - `Repository::create_project`, `get_project`, `list_projects`, `create_deployment`, `list_deployments`
 
-- [ ] **Step 1: Write failing repository tests** for project round trip, deployment status update, unique project names per user, and transaction rollback.
-- [ ] **Step 2: Run `cargo test --test repository_test`** and confirm missing database/repository symbols fail.
-- [ ] **Step 3: Add the migration tables** with UUID primary keys, UTC timestamps, unique constraints, status checks, indexes on `(user_id, created_at)` and `(project_id, created_at)`, and an audit event table.
-- [ ] **Step 4: Implement the pool/migration wrapper** with `sqlx` or an equivalent async PostgreSQL client and a test repository fixture.
-- [ ] **Step 5: Implement typed repository methods** using parameterized SQL and transactions; never concatenate user input into SQL.
-- [ ] **Step 6: Run `cargo fmt --check && cargo test --test repository_test`** and verify rollback leaves no partial records.
-- [ ] **Step 7: Commit** with `git add migrations src/db.rs src/repository.rs tests/repository_test.rs Cargo.toml src/lib.rs && git commit -m "feat: add postgres control plane repositories"`.
+- [x] **Step 1: Write failing repository tests** for project round trip, deployment status update, unique project names per user, and transaction rollback.
+- [x] **Step 2: Run `cargo test --test repository_test`** and confirm missing database/repository symbols fail.
+- [x] **Step 3: Add the migration tables** with UUID primary keys, UTC timestamps, unique constraints, status checks, indexes on `(user_id, created_at)` and `(project_id, created_at)`, and an audit event table.
+- [x] **Step 4: Implement the pool/migration wrapper** with `sqlx` or an equivalent async PostgreSQL client and a test repository fixture.
+- [x] **Step 5: Implement typed repository methods** using parameterized SQL and transactions; never concatenate user input into SQL.
+- [x] **Step 6: Run `cargo fmt --check && cargo test --test repository_test`** and verify rollback leaves no partial records.
+- [x] **Step 7: Commit** with `git add migrations src/db.rs src/repository.rs tests/repository_test.rs Cargo.toml src/lib.rs && git commit -m "feat: add postgres control plane repositories"`.
 
 ### Task 2: Add sessions, authorization, and CLI tokens
 
@@ -79,13 +79,13 @@
 - `AuthContext { user_id, session_id, scopes }`
 - `require_user`, `require_scope` Axum middleware
 
-- [ ] **Step 1: Write failing tests** for cookie session expiry, token hashing, one-time raw-token return, revoked token rejection, and scope denial.
-- [ ] **Step 2: Run `cargo test --test auth_test`** and verify the auth layer is absent.
-- [ ] **Step 3: Add `users`, `sessions`, and `api_tokens` columns/tables** with hash, expiry, revocation, last-used, and scope fields.
-- [ ] **Step 4: Implement Argon2id hashing** with a per-token salt; compare hashes in constant time and store only a short token prefix for display.
-- [ ] **Step 5: Implement secure cookie sessions** with HTTP-only, Secure-in-production, SameSite=Lax attributes and server-side expiry checks.
-- [ ] **Step 6: Add auth routes**: `POST /v1/auth/session`, `DELETE /v1/auth/session`, `GET /v1/me`, `POST /v1/me/api-tokens`, `DELETE /v1/me/api-tokens/:id`.
-- [ ] **Step 7: Run focused/full auth tests** and commit `feat: add authenticated sessions and api tokens`.
+- [x] **Step 1: Write failing tests** for cookie session expiry, token hashing, one-time raw-token return, revoked token rejection, and scope denial.
+- [x] **Step 2: Run `cargo test --test auth_test`** and verify the auth layer is absent.
+- [x] **Step 3: Add `users`, `sessions`, and `api_tokens` columns/tables** with hash, expiry, revocation, last-used, and scope fields.
+- [x] **Step 4: Implement Argon2id hashing** with a per-token salt; compare hashes in constant time and store only a short token prefix for display.
+- [x] **Step 5: Implement secure cookie sessions** with HTTP-only, Secure-in-production, SameSite=Lax attributes and server-side expiry checks.
+- [x] **Step 6: Add auth routes**: `POST /v1/auth/session`, `DELETE /v1/auth/session`, `GET /v1/me`, `POST /v1/me/api-tokens`, `DELETE /v1/me/api-tokens/:id`.
+- [x] **Step 7: Run focused/full auth tests** and commit `feat: add authenticated sessions and api tokens`.
 
 ### Task 3: Move project/deployment routes behind authorization
 
@@ -100,12 +100,12 @@
 - `ProjectAccess::can_read`, `can_mutate`, and `can_operate` are explicit checks.
 - `AuditService::record(actor, action, target, metadata)` records mutations.
 
-- [ ] **Step 1: Write failing API tests** for unauthenticated 401, authenticated ownership, cross-user 403, and audit rows.
-- [ ] **Step 2: Run the tests and confirm current unauthenticated behavior fails the new contract.**
-- [ ] **Step 3: Add middleware and access checks** to every project/deployment/environment route.
-- [ ] **Step 4: Preserve M1 response shapes** while adding `request_id` and authenticated actor metadata.
-- [ ] **Step 5: Add project/deployment audit records** for create, deploy, stop, and token changes.
-- [ ] **Step 6: Run `cargo test --test authenticated_api_test && cargo test`** and commit `feat: authorize control plane routes`.
+- [x] **Step 1: Write failing API tests** for unauthenticated 401, authenticated ownership, cross-user 403, and audit rows.
+- [x] **Step 2: Run the tests and confirm current unauthenticated behavior fails the new contract.**
+- [x] **Step 3: Add middleware and access checks** to every project/deployment/environment route.
+- [x] **Step 4: Preserve M1 response shapes** while adding `request_id` and authenticated actor metadata.
+- [x] **Step 5: Add project/deployment audit records** for create, deploy, stop, and token changes.
+- [x] **Step 6: Run `cargo test --test authenticated_api_test && cargo test`** and commit `feat: authorize control plane routes`.
 
 ### Task 4: Add the typed dashboard application
 
@@ -125,13 +125,13 @@
 - `ApiClient` methods mirror `/v1/me`, projects, deployments, logs, and auth routes.
 - Shared components implement the states in `FRONTEND.md`.
 
-- [ ] **Step 1: Write failing component tests** for `StatusBadge`, `DeploymentCard`, `EmptyState`, `LogViewer`, and authenticated route redirect.
-- [ ] **Step 2: Run `cd dashboard && npm test`** and confirm the app/test harness is absent.
-- [ ] **Step 3: Scaffold the Next.js app** with strict TypeScript, test scripts, API base URL, and secure session handling.
-- [ ] **Step 4: Implement `AppShell`, project switcher, status components, loading/error states, and responsive navigation.**
-- [ ] **Step 5: Implement login, dashboard, project list/create, project overview, deployment list/detail, logs, and stop/redeploy controls.**
-- [ ] **Step 6: Add Playwright coverage** for login, project creation, successful deployment, failed deployment, and log viewing with a mocked API fixture.
-- [ ] **Step 7: Run `npm test && npm run build && npx playwright test`** and commit `feat: add authenticated deployment dashboard`.
+- [x] **Step 1: Write failing component tests** for `StatusBadge`, `DeploymentCard`, `EmptyState`, `LogViewer`, and authenticated route redirect.
+- [x] **Step 2: Run `cd dashboard && npm test`** and confirm the app/test harness is absent.
+- [x] **Step 3: Scaffold the Next.js app** with strict TypeScript, test scripts, API base URL, and secure session handling.
+- [x] **Step 4: Implement `AppShell`, project switcher, status components, loading/error states, and responsive navigation.**
+- [x] **Step 5: Implement login, dashboard, project list/create, project overview, deployment list/detail, logs, and stop/redeploy controls.**
+- [x] **Step 6: Add Playwright coverage** for login, project creation, successful deployment, failed deployment, and log viewing with a mocked API fixture.
+- [x] **Step 7: Run `npm test && npm run build && npx playwright test`** and commit `feat: add authenticated deployment dashboard`.
 
 ### Task 5: Add environment/token UI and M2 documentation
 
@@ -141,11 +141,11 @@
 - Create: `dashboard/app/account/api-tokens/page.tsx`
 - Modify: `dashboard/lib/api.ts`, `FRONTEND.md`, `README.md`
 
-- [ ] **Step 1: Write failing tests** for write-only secret rendering, key validation, token one-time display, and revoke confirmation.
-- [ ] **Step 2: Implement environment-variable and token pages** with explicit pending/success/failure states.
-- [ ] **Step 3: Add API client redaction tests** proving secret values never enter query caches, URLs, or analytics payloads.
-- [ ] **Step 4: Document local PostgreSQL, API, dashboard, and CLI startup.**
-- [ ] **Step 5: Run all Rust and dashboard verification commands** and commit the M2 docs/UI changes.
+- [x] **Step 1: Write failing tests** for write-only secret rendering, key validation, token one-time display, and revoke confirmation.
+- [x] **Step 2: Implement environment-variable and token pages** with explicit pending/success/failure states.
+- [x] **Step 3: Add API client redaction tests** proving secret values never enter query caches, URLs, or analytics payloads.
+- [x] **Step 4: Document local PostgreSQL, API, dashboard, and CLI startup.**
+- [x] **Step 5: Run all Rust and dashboard verification commands** and commit the M2 docs/UI changes.
 
 ## M2 Acceptance Criteria
 
