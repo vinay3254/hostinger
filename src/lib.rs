@@ -6,6 +6,7 @@ pub mod db;
 pub mod detector;
 pub mod model;
 pub mod providers;
+pub mod queue;
 pub mod repository;
 pub mod runtime;
 pub mod service;
