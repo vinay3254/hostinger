@@ -5,9 +5,12 @@ pub mod config;
 pub mod db;
 pub mod detector;
 pub mod model;
+pub mod providers;
 pub mod repository;
 pub mod runtime;
 pub mod service;
+pub mod source_events;
 pub mod store;
+pub mod webhooks;
 
 pub type Result<T> = anyhow::Result<T>;
