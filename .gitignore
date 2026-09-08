@@ -2,3 +2,7 @@
 /.deploy-platform/
 /builds/
 *.tar.gz
+node_modules/
+.next/
+test-results/
+playwright-report/
