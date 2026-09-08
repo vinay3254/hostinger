@@ -59,6 +59,20 @@ The planned implementation uses:
 The frontend talks to the API server only. It never calls minidock, build
 workers, scheduler nodes, databases, or storage directly.
 
+### M2 Implementation (`dashboard/`)
+
+The M2 dashboard application is located in `dashboard/` and features:
+- **Framework:** Next.js 14 App Router with TypeScript.
+- **Data Fetching:** TanStack Query (`@tanstack/react-query`) with automatic cache invalidation and live polling for active deployments and logs.
+- **Client & Redaction:** Strongly-typed `ApiClient` (`dashboard/lib/api.ts`) supporting credentials inclusion, error parsing, and strict redaction of sensitive tokens and keys from telemetry.
+- **Testing:** Unit and component tests with Vitest and React Testing Library (`npm test`), plus end-to-end user workflows using Playwright (`npx playwright test`).
+- **Commands:**
+  - `cd dashboard && npm install`
+  - `npm test` - Run Vitest unit & component test suite
+  - `npm run build` - Production Next.js build
+  - `npx playwright test` - End-to-end integration test suite
+  - `npm run dev` - Start local Next.js development server on port 3000
+
 ## Information Architecture
 
 ### Public routes
