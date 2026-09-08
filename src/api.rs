@@ -4,9 +4,12 @@ use crate::auth::{
 use crate::config::PlatformConfig;
 use crate::db::Database;
 use crate::model::{CreateProjectInput, Deployment, Project};
+use crate::providers::{crypto, Provider, ProviderClient};
+use crate::repository::{ProjectSourceDetails, UpsertConnectionInput};
 use crate::service::PlatformService;
+use crate::source_events::SourceEventRecord;
 use axum::{
-    extract::{FromRef, FromRequestParts, Path, State},
+    extract::{FromRef, FromRequestParts, Path, Query, State},
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -22,6 +25,16 @@ pub struct ApiState {
     pub service: Arc<dyn PlatformService>,
     pub auth: Option<AuthService>,
     pub db: Option<Database>,
+    pub providers: Vec<Arc<dyn ProviderClient>>,
+}
+
+impl ApiState {
+    pub fn get_provider(&self, provider: Provider) -> Option<Arc<dyn ProviderClient>> {
+        self.providers
+            .iter()
+            .find(|p| p.provider() == provider)
+            .cloned()
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -583,6 +596,320 @@ async fn revoke_api_token(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(serde::Deserialize)]
+pub struct OAuthConnectQuery {
+    pub redirect_uri: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct OAuthCallbackQuery {
+    pub code: String,
+    pub state: String,
+    pub redirect_uri: Option<String>,
+}
+
+async fn provider_connect(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(provider_str): Path<String>,
+    Query(query): Query<OAuthConnectQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let provider: Provider = provider_str
+        .parse()
+        .map_err(|e: anyhow::Error| ApiError::BadRequest(e.to_string()))?;
+    let client = state
+        .get_provider(provider)
+        .ok_or_else(|| ApiError::BadRequest(format!("provider {provider} is not configured")))?;
+    let db = state
+        .db
+        .clone()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+
+    let state_token = format!(
+        "{}_{}",
+        Uuid::new_v4().simple(),
+        hex::encode(rand::random::<[u8; 16]>())
+    );
+    let redirect_uri = query
+        .redirect_uri
+        .unwrap_or_else(|| format!("http://localhost:3000/api/providers/{provider}/callback"));
+
+    let now = time::OffsetDateTime::now_utc();
+    let expires_at = now + time::Duration::minutes(5);
+    db.providers()
+        .save_oauth_state(
+            &state_token,
+            auth_ctx.user_id,
+            provider,
+            Some(&redirect_uri),
+            expires_at,
+            now,
+        )
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let auth_url = client.begin_authorization(&state_token, &redirect_uri);
+    Ok(Json(serde_json::json!({
+        "url": auth_url,
+        "state": state_token
+    })))
+}
+
+async fn provider_callback(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(provider_str): Path<String>,
+    Query(query): Query<OAuthCallbackQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let provider: Provider = provider_str
+        .parse()
+        .map_err(|e: anyhow::Error| ApiError::BadRequest(e.to_string()))?;
+    let client = state
+        .get_provider(provider)
+        .ok_or_else(|| ApiError::BadRequest(format!("provider {provider} is not configured")))?;
+    let db = state
+        .db
+        .clone()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+
+    let state_record = db
+        .providers()
+        .consume_oauth_state(&query.state)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::BadRequest("invalid or expired oauth state".into()))?;
+
+    if state_record.user_id != auth_ctx.user_id || state_record.provider != provider {
+        return Err(ApiError::BadRequest("oauth state mismatch".into()));
+    }
+
+    let redirect_uri = query
+        .redirect_uri
+        .or(state_record.redirect_url)
+        .unwrap_or_else(|| format!("http://localhost:3000/api/providers/{provider}/callback"));
+
+    let token_resp = client
+        .complete_authorization(&query.code, &redirect_uri)
+        .await
+        .map_err(|e| ApiError::BadRequest(format!("oauth authorization failed: {e}")))?;
+
+    let enc_key = crypto::default_encryption_key();
+    let enc_access_token = crypto::encrypt_token(&token_resp.access_token, &enc_key)
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let enc_refresh_token = match &token_resp.refresh_token {
+        Some(t) => Some(
+            crypto::encrypt_token(t, &enc_key).map_err(|e| ApiError::Internal(e.to_string()))?,
+        ),
+        None => None,
+    };
+
+    let now = time::OffsetDateTime::now_utc();
+    let expires_at = token_resp
+        .expires_in
+        .map(|sec| now + time::Duration::seconds(sec));
+
+    let conn = db
+        .providers()
+        .upsert_connection(UpsertConnectionInput {
+            id: Uuid::new_v4(),
+            user_id: auth_ctx.user_id,
+            provider,
+            external_user_id: token_resp.external_user_id.clone(),
+            access_token_encrypted: enc_access_token,
+            refresh_token_encrypted: enc_refresh_token,
+            expires_at,
+            created_at: now,
+            updated_at: now,
+        })
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // Sync repositories
+    if let Ok(repos) = client.list_repositories(&token_resp.access_token).await {
+        let _ = db.providers().save_repositories(conn.id, &repos, now).await;
+    }
+
+    let audit = AuditService::new(state.db.clone());
+    let _ = audit
+        .record(
+            auth_ctx.user_id,
+            "provider.connect",
+            "provider_connection",
+            conn.id,
+            serde_json::json!({
+                "provider": provider.to_string(),
+                "external_user_id": token_resp.external_user_id
+            }),
+        )
+        .await;
+
+    Ok(Json(serde_json::json!({
+        "status": "connected",
+        "provider": provider.to_string(),
+        "external_user_id": token_resp.external_user_id
+    })))
+}
+
+async fn list_provider_repositories(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(provider_str): Path<String>,
+) -> Result<Json<Vec<crate::repository::ProviderRepositoryRecord>>, ApiError> {
+    let provider: Provider = provider_str
+        .parse()
+        .map_err(|e: anyhow::Error| ApiError::BadRequest(e.to_string()))?;
+    let db = state
+        .db
+        .clone()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+
+    let repos = db
+        .providers()
+        .list_repositories(auth_ctx.user_id, provider)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(repos))
+}
+
+#[derive(serde::Deserialize)]
+pub struct UpdateProjectSourceRequest {
+    pub repository_id: Uuid,
+    pub target_branch: Option<String>,
+}
+
+async fn get_project_source(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(project_id): Path<String>,
+) -> Result<Json<ProjectSourceDetails>, ApiError> {
+    let id = parse_id(&project_id)?;
+    let project = state.service.project(id).map_err(map_service_err)?;
+    let access = ProjectAccess::new(&auth_ctx, project.user_id);
+    if !access.can_read() {
+        return Err(ApiError::Forbidden(
+            "access to project source denied".into(),
+        ));
+    }
+    let db = state
+        .db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+    let mut projects_repo = db.projects();
+    let details = projects_repo
+        .get_project_source(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(details))
+}
+
+async fn update_project_source(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(project_id): Path<String>,
+    Json(req): Json<UpdateProjectSourceRequest>,
+) -> Result<Json<ProjectSourceDetails>, ApiError> {
+    let id = parse_id(&project_id)?;
+    let project = state.service.project(id).map_err(map_service_err)?;
+    let access = ProjectAccess::new(&auth_ctx, project.user_id);
+    if !access.can_mutate() {
+        return Err(ApiError::Forbidden("operation on project denied".into()));
+    }
+    let db = state
+        .db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+    let generated_secret = hex::encode(rand::random::<[u8; 24]>());
+    let target_branch = req.target_branch.unwrap_or_else(|| "main".to_string());
+
+    let mut projects_repo = db.projects();
+    projects_repo
+        .set_project_source(id, req.repository_id, &target_branch, &generated_secret)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let details = projects_repo
+        .get_project_source(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let audit = AuditService::new(state.db.clone());
+    let _ = audit
+        .record(
+            auth_ctx.user_id,
+            "project.source.update",
+            "project",
+            id,
+            serde_json::json!({
+                "repository_id": req.repository_id,
+                "target_branch": target_branch,
+            }),
+        )
+        .await;
+
+    Ok(Json(details))
+}
+
+async fn disconnect_project_source(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(project_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let id = parse_id(&project_id)?;
+    let project = state.service.project(id).map_err(map_service_err)?;
+    let access = ProjectAccess::new(&auth_ctx, project.user_id);
+    if !access.can_mutate() {
+        return Err(ApiError::Forbidden("operation on project denied".into()));
+    }
+    let db = state
+        .db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+    let mut projects_repo = db.projects();
+    projects_repo
+        .disconnect_project_source(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let audit = AuditService::new(state.db.clone());
+    let _ = audit
+        .record(
+            auth_ctx.user_id,
+            "project.source.disconnect",
+            "project",
+            id,
+            serde_json::json!({}),
+        )
+        .await;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_project_source_events(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(project_id): Path<String>,
+) -> Result<Json<Vec<SourceEventRecord>>, ApiError> {
+    let id = parse_id(&project_id)?;
+    let project = state.service.project(id).map_err(map_service_err)?;
+    let access = ProjectAccess::new(&auth_ctx, project.user_id);
+    if !access.can_read() {
+        return Err(ApiError::Forbidden(
+            "access to project source events denied".into(),
+        ));
+    }
+    let db = state
+        .db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+    let mut events_repo = db.source_events();
+    let events = events_repo
+        .list_by_project(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(events))
+}
+
 pub fn router(service: Arc<dyn PlatformService>) -> Router {
     router_with_auth(service, None, None)
 }
@@ -592,7 +919,38 @@ pub fn router_with_auth(
     auth: Option<AuthService>,
     db: Option<Database>,
 ) -> Router {
-    let state = ApiState { service, auth, db };
+    router_with_providers(service, auth, db, default_providers())
+}
+
+pub fn default_providers() -> Vec<Arc<dyn ProviderClient>> {
+    let mut providers: Vec<Arc<dyn ProviderClient>> = Vec::new();
+    if let (Ok(id), Ok(sec)) = (
+        std::env::var("GITHUB_CLIENT_ID"),
+        std::env::var("GITHUB_CLIENT_SECRET"),
+    ) {
+        providers.push(Arc::new(crate::providers::GitHubClient::new(id, sec)));
+    }
+    if let (Ok(id), Ok(sec)) = (
+        std::env::var("GITLAB_CLIENT_ID"),
+        std::env::var("GITLAB_CLIENT_SECRET"),
+    ) {
+        providers.push(Arc::new(crate::providers::GitLabClient::new(id, sec)));
+    }
+    providers
+}
+
+pub fn router_with_providers(
+    service: Arc<dyn PlatformService>,
+    auth: Option<AuthService>,
+    db: Option<Database>,
+    providers: Vec<Arc<dyn ProviderClient>>,
+) -> Router {
+    let state = ApiState {
+        service,
+        auth,
+        db,
+        providers,
+    };
     Router::new()
         .route("/healthz", get(healthz))
         .route(
@@ -618,5 +976,25 @@ pub fn router_with_auth(
             get(get_deployment_logs),
         )
         .route("/v1/deployments/:deployment_id/stop", post(stop_deployment))
+        .route("/v1/providers/:provider/connect", get(provider_connect))
+        .route("/v1/providers/:provider/callback", get(provider_callback))
+        .route(
+            "/v1/providers/:provider/repositories",
+            get(list_provider_repositories),
+        )
+        .route(
+            "/v1/projects/:project_id/source",
+            get(get_project_source)
+                .post(update_project_source)
+                .delete(disconnect_project_source),
+        )
+        .route(
+            "/v1/projects/:project_id/source/events",
+            get(list_project_source_events),
+        )
+        .route(
+            "/v1/webhooks/:provider/:project_id",
+            post(crate::webhooks::handle_webhook),
+        )
         .with_state(state)
 }
