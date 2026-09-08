@@ -44,6 +44,7 @@ fn real_static_deployment_serves_index_html() {
                 "-h".into(),
                 "/srv/app".into(),
             ],
+            user_id: None,
         })
         .unwrap();
     let deployment = service.deploy(project.id).unwrap();
