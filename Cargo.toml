@@ -31,6 +31,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 aes-gcm = "0.10.3"
 async-trait = "0.1.89"
 subtle = "2.6.1"
+redis = { version = "0.24", features = ["tokio-comp"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
