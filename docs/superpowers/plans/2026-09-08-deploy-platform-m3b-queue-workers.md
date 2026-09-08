@@ -57,11 +57,11 @@ pub struct BuildPlan { pub framework: Framework, pub install: Vec<String>, pub b
 pub fn detect_build_plan(root: &Path) -> Result<BuildPlan>;
 ```
 
-- [ ] **Step 1: Write failing checkout tests** for exact SHA, branch/SHA mismatch, traversal in workspace, and nonzero git command.
-- [ ] **Step 2: Implement argv-only `git init/fetch/checkout`** with a no-shell command runner and a workspace under the job UUID.
-- [ ] **Step 3: Add framework tests** for static, Node/Next.js, Python, unsupported, and invalid config cases.
-- [ ] **Step 4: Implement build-plan detection** from package/lock files, `requirements.txt`, `index.html`, and `Dockerfile`, rejecting ambiguous plans with an explicit message.
-- [ ] **Step 5: Run checkout/framework tests** and commit `feat: add exact source checkout and build plans`.
+- [x] **Step 1: Write failing checkout tests** for exact SHA, branch/SHA mismatch, traversal in workspace, and nonzero git command.
+- [x] **Step 2: Implement argv-only `git init/fetch/checkout`** with a no-shell command runner and a workspace under the job UUID.
+- [x] **Step 3: Add framework tests** for static, Node/Next.js, Python, unsupported, and invalid config cases.
+- [x] **Step 4: Implement build-plan detection** from package/lock files, `requirements.txt`, `index.html`, and `Dockerfile`, rejecting ambiguous plans with an explicit message.
+- [x] **Step 5: Run checkout/framework tests** and commit `feat: add exact source checkout and build plans`.
 
 ### Task 3: Execute builds in isolated containers
 
