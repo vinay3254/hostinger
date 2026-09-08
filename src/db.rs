@@ -1,0 +1,102 @@
+use crate::repository::{
+    AuditRepository, DbExecutor, DeploymentRepository, ProjectRepository, UserRepository,
+};
+use anyhow::{Context, Result};
+use sqlx::{postgres::PgPoolOptions, PgPool};
+use std::path::Path;
+
+#[derive(Clone)]
+pub struct Database {
+    pool: PgPool,
+}
+
+impl Database {
+    pub async fn connect(url: &str) -> Result<Self> {
+        let pool = PgPoolOptions::new()
+            .max_connections(10)
+            .connect(url)
+            .await
+            .with_context(|| format!("failed to connect to database at {url}"))?;
+        Ok(Self { pool })
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    pub async fn migrate(&self) -> Result<()> {
+        let migrator = sqlx::migrate::Migrator::new(Path::new("migrations"))
+            .await
+            .context("failed to load migrations from migrations/")?;
+        migrator
+            .run(&self.pool)
+            .await
+            .context("failed to run database migrations")?;
+        Ok(())
+    }
+
+    pub async fn begin(&self) -> Result<DbTransaction> {
+        let tx = self
+            .pool
+            .begin()
+            .await
+            .context("failed to begin transaction")?;
+        Ok(DbTransaction { tx })
+    }
+
+    pub fn users(&self) -> UserRepository<'_> {
+        UserRepository::new(DbExecutor::Pool(&self.pool))
+    }
+
+    pub fn projects(&self) -> ProjectRepository<'_> {
+        ProjectRepository::new(DbExecutor::Pool(&self.pool))
+    }
+
+    pub fn deployments(&self) -> DeploymentRepository<'_> {
+        DeploymentRepository::new(DbExecutor::Pool(&self.pool))
+    }
+
+    pub fn audit(&self) -> AuditRepository<'_> {
+        AuditRepository::new(DbExecutor::Pool(&self.pool))
+    }
+
+    pub fn audits(&self) -> AuditRepository<'_> {
+        self.audit()
+    }
+}
+
+pub struct DbTransaction {
+    tx: sqlx::Transaction<'static, sqlx::Postgres>,
+}
+
+impl DbTransaction {
+    pub fn users(&mut self) -> UserRepository<'_> {
+        UserRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub fn projects(&mut self) -> ProjectRepository<'_> {
+        ProjectRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub fn deployments(&mut self) -> DeploymentRepository<'_> {
+        DeploymentRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub fn audit(&mut self) -> AuditRepository<'_> {
+        AuditRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub async fn commit(self) -> Result<()> {
+        self.tx
+            .commit()
+            .await
+            .context("failed to commit transaction")
+    }
+
+    pub async fn rollback(self) -> Result<()> {
+        self.tx
+            .rollback()
+            .await
+            .context("failed to rollback transaction")
+    }
+}
