@@ -456,6 +456,85 @@ async fn stop_deployment(
     Ok(Json(deployment))
 }
 
+async fn cancel_deployment(
+    State(state): State<ApiState>,
+    _auth_ctx: AuthContext,
+    Path(deployment_id): Path<String>,
+) -> Result<Json<Deployment>, ApiError> {
+    let id = parse_id(&deployment_id)?;
+    if let Some(queue) = &state.queue {
+        if let Ok(Some(job)) = queue.get_job_by_deployment(id).await {
+            let _ = queue.cancel(job.id).await;
+        }
+    }
+    if let Some(db) = &state.db {
+        let _ = sqlx::query("UPDATE deployments SET status = 'cancelled' WHERE id = $1")
+            .bind(id)
+            .execute(db.pool())
+            .await;
+    }
+    let deployment = state.service.deployment(id).unwrap_or(Deployment {
+        id,
+        project_id: Uuid::nil(),
+        framework: crate::model::Framework::Static,
+        status: crate::model::DeploymentStatus::Cancelled,
+        image_path: None,
+        container_id: None,
+        port: None,
+        url: None,
+        error: None,
+        created_at: time::OffsetDateTime::now_utc(),
+        finished_at: Some(time::OffsetDateTime::now_utc()),
+    });
+    Ok(Json(deployment))
+}
+
+async fn retry_deployment(
+    State(state): State<ApiState>,
+    _auth_ctx: AuthContext,
+    Path(deployment_id): Path<String>,
+) -> Result<(StatusCode, Json<Deployment>), ApiError> {
+    let id = parse_id(&deployment_id)?;
+    let now = time::OffsetDateTime::now_utc();
+    if let Some(queue) = &state.queue {
+        if let Some(db) = &state.db {
+            let proj_id_opt: Option<Uuid> =
+                sqlx::query_scalar("SELECT project_id FROM deployments WHERE id = $1")
+                    .bind(id)
+                    .fetch_optional(db.pool())
+                    .await
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+            if let Some(proj_id) = proj_id_opt {
+                let _ = sqlx::query(
+                    "UPDATE deployments SET status = 'queued', error = NULL WHERE id = $1",
+                )
+                .bind(id)
+                .execute(db.pool())
+                .await;
+
+                let _ = queue
+                    .enqueue_job(id, proj_id, crate::queue::BuildPriority::Production)
+                    .await;
+            }
+        }
+    }
+    let deployment = Deployment {
+        id,
+        project_id: Uuid::nil(),
+        framework: crate::model::Framework::Static,
+        status: crate::model::DeploymentStatus::Queued,
+        image_path: None,
+        container_id: None,
+        port: None,
+        url: None,
+        error: None,
+        created_at: now,
+        finished_at: None,
+    };
+    Ok((StatusCode::ACCEPTED, Json(deployment)))
+}
+
 async fn login_session(
     State(state): State<ApiState>,
     jar: CookieJar,
@@ -1054,6 +1133,14 @@ pub fn router_with_queue(
             get(get_deployment_logs),
         )
         .route("/v1/deployments/:deployment_id/stop", post(stop_deployment))
+        .route(
+            "/v1/deployments/:deployment_id/cancel",
+            post(cancel_deployment),
+        )
+        .route(
+            "/v1/deployments/:deployment_id/retry",
+            post(retry_deployment),
+        )
         .route("/v1/providers/:provider/connect", get(provider_connect))
         .route("/v1/providers/:provider/callback", get(provider_callback))
         .route(
