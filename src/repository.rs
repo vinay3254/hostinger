@@ -412,10 +412,12 @@ fn parse_status(s: &str) -> DeploymentStatus {
 fn status_to_str(s: DeploymentStatus) -> &'static str {
     match s {
         DeploymentStatus::Pending => "pending",
+        DeploymentStatus::Queued => "queued",
         DeploymentStatus::Building => "building",
         DeploymentStatus::Running => "running",
         DeploymentStatus::Failed => "failed",
         DeploymentStatus::Stopped => "stopped",
+        DeploymentStatus::Cancelled => "cancelled",
     }
 }
 
