@@ -89,6 +89,7 @@ fn project_input(source: &Path, base_image: &Path) -> CreateProjectInput {
             "-h".into(),
             "/srv/app".into(),
         ],
+        user_id: None,
     }
 }
 
