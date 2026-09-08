@@ -39,6 +39,8 @@ impl PlatformState {
 pub struct Project {
     pub id: Uuid,
     pub name: String,
+    #[serde(default)]
+    pub user_id: Option<Uuid>,
     pub source_dir: PathBuf,
     pub base_image: PathBuf,
     pub server_command: Vec<String>,
@@ -74,6 +76,7 @@ pub struct CreateProjectInput {
     pub source_dir: PathBuf,
     pub base_image: PathBuf,
     pub server_command: Vec<String>,
+    pub user_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
