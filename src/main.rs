@@ -98,6 +98,7 @@ async fn run() -> Result<()> {
                 source_dir: source,
                 base_image,
                 server_command: config.server_command,
+                user_id: None,
             };
             let project = service.create_project(input)?;
             println!("{}", serde_json::to_string_pretty(&project)?);
