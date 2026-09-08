@@ -6,6 +6,14 @@ use uuid::Uuid;
 #[serde(rename_all = "lowercase")]
 pub enum Framework {
     Static,
+    #[serde(rename = "node")]
+    Node,
+    #[serde(rename = "nextjs")]
+    NextJs,
+    #[serde(rename = "python")]
+    Python,
+    #[serde(rename = "docker")]
+    Docker,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
