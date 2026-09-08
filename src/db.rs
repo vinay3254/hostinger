@@ -1,6 +1,8 @@
 use crate::repository::{
-    AuditRepository, DbExecutor, DeploymentRepository, ProjectRepository, UserRepository,
+    AuditRepository, DbExecutor, DeploymentRepository, ProjectRepository, ProviderRepository,
+    UserRepository,
 };
+use crate::source_events::SourceEventRepository;
 use anyhow::{Context, Result};
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use std::path::Path;
@@ -63,6 +65,14 @@ impl Database {
     pub fn audits(&self) -> AuditRepository<'_> {
         self.audit()
     }
+
+    pub fn providers(&self) -> ProviderRepository<'_> {
+        ProviderRepository::new(DbExecutor::Pool(&self.pool))
+    }
+
+    pub fn source_events(&self) -> SourceEventRepository<'_> {
+        SourceEventRepository::new(DbExecutor::Pool(&self.pool))
+    }
 }
 
 pub struct DbTransaction {
@@ -84,6 +94,14 @@ impl DbTransaction {
 
     pub fn audit(&mut self) -> AuditRepository<'_> {
         AuditRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub fn providers(&mut self) -> ProviderRepository<'_> {
+        ProviderRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub fn source_events(&mut self) -> SourceEventRepository<'_> {
+        SourceEventRepository::new(DbExecutor::Tx(&mut self.tx))
     }
 
     pub async fn commit(self) -> Result<()> {
