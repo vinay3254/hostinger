@@ -26,6 +26,7 @@ pub struct ApiState {
     pub auth: Option<AuthService>,
     pub db: Option<Database>,
     pub providers: Vec<Arc<dyn ProviderClient>>,
+    pub queue: Option<crate::queue::BuildQueue>,
 }
 
 impl ApiState {
@@ -247,6 +248,23 @@ async fn create_project(
         .create_project(input)
         .map_err(map_service_err)?;
 
+    if let Some(db) = &state.db {
+        if !auth_ctx.user_id.is_nil() {
+            let _ = db
+                .projects()
+                .create_project(crate::repository::CreateProjectRecord {
+                    id: project.id,
+                    user_id: auth_ctx.user_id,
+                    name: project.name.clone(),
+                    source_dir: project.source_dir.clone(),
+                    base_image: project.base_image.clone(),
+                    server_command: project.server_command.clone(),
+                    created_at: project.created_at,
+                })
+                .await;
+        }
+    }
+
     let audit = AuditService::new(state.db.clone());
     let _ = audit
         .record(
@@ -303,20 +321,69 @@ async fn create_deployment(
     if !access.can_operate() {
         return Err(ApiError::Forbidden("operation on project denied".into()));
     }
-    let deployment = state.service.deploy(id).map_err(map_service_err)?;
 
-    let audit = AuditService::new(state.db.clone());
-    let _ = audit
-        .record(
-            auth_ctx.user_id,
-            "deployment.create",
-            "deployment",
-            deployment.id,
-            serde_json::json!({ "project_id": project.id, "status": deployment.status }),
-        )
-        .await;
+    if let Some(queue) = &state.queue {
+        let deployment_id = Uuid::new_v4();
+        let now = time::OffsetDateTime::now_utc();
+        if let Some(db) = &state.db {
+            let _ = sqlx::query(
+                "INSERT INTO deployments (id, project_id, framework, status, created_at)
+                 VALUES ($1, $2, 'static', 'queued', $3)",
+            )
+            .bind(deployment_id)
+            .bind(id)
+            .bind(now)
+            .execute(db.pool())
+            .await;
+        }
 
-    Ok((StatusCode::CREATED, Json(deployment)))
+        queue
+            .enqueue_job(deployment_id, id, crate::queue::BuildPriority::Production)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        let deployment = Deployment {
+            id: deployment_id,
+            project_id: id,
+            framework: crate::model::Framework::Static,
+            status: crate::model::DeploymentStatus::Queued,
+            image_path: None,
+            container_id: None,
+            port: None,
+            url: None,
+            error: None,
+            created_at: now,
+            finished_at: None,
+        };
+
+        let audit = AuditService::new(state.db.clone());
+        let _ = audit
+            .record(
+                auth_ctx.user_id,
+                "deployment.create",
+                "deployment",
+                deployment.id,
+                serde_json::json!({ "project_id": project.id, "status": deployment.status }),
+            )
+            .await;
+
+        Ok((StatusCode::ACCEPTED, Json(deployment)))
+    } else {
+        let deployment = state.service.deploy(id).map_err(map_service_err)?;
+
+        let audit = AuditService::new(state.db.clone());
+        let _ = audit
+            .record(
+                auth_ctx.user_id,
+                "deployment.create",
+                "deployment",
+                deployment.id,
+                serde_json::json!({ "project_id": project.id, "status": deployment.status }),
+            )
+            .await;
+
+        Ok((StatusCode::CREATED, Json(deployment)))
+    }
 }
 
 async fn get_deployment(
@@ -945,11 +1012,22 @@ pub fn router_with_providers(
     db: Option<Database>,
     providers: Vec<Arc<dyn ProviderClient>>,
 ) -> Router {
+    router_with_queue(service, auth, db, providers, None)
+}
+
+pub fn router_with_queue(
+    service: Arc<dyn PlatformService>,
+    auth: Option<AuthService>,
+    db: Option<Database>,
+    providers: Vec<Arc<dyn ProviderClient>>,
+    queue: Option<crate::queue::BuildQueue>,
+) -> Router {
     let state = ApiState {
         service,
         auth,
         db,
         providers,
+        queue,
     };
     Router::new()
         .route("/healthz", get(healthz))
