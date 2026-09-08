@@ -74,11 +74,11 @@ pub trait BuildExecutor {
 pub struct BuildResult { pub artifact_path: PathBuf, pub cache_key: String, pub duration: Duration }
 ```
 
-- [ ] **Step 1: Write failing executor tests** for command ordering, timeout, nonzero exit, log redaction, and artifact containment.
-- [ ] **Step 2: Implement `MinidockBuildExecutor`** using a build rootfs, explicit argv, resource limits, timeout, and a separate workspace mount/copy.
-- [ ] **Step 3: Stream stdout/stderr as `BuildLogLine` events** with sequence, timestamp, stream, and redacted text.
-- [ ] **Step 4: Reject output paths outside the job artifact directory** and package only validated output files.
-- [ ] **Step 5: Run executor tests with a fake process/runtime and ignored privileged smoke coverage**; commit `feat: isolate build execution`.
+- [x] **Step 1: Write failing executor tests** for command ordering, timeout, nonzero exit, log redaction, and artifact containment.
+- [x] **Step 2: Implement `MinidockBuildExecutor`** using a build rootfs, explicit argv, resource limits, timeout, and a separate workspace mount/copy.
+- [x] **Step 3: Stream stdout/stderr as `BuildLogLine` events** with sequence, timestamp, stream, and redacted text.
+- [x] **Step 4: Reject output paths outside the job artifact directory** and package only validated output files.
+- [x] **Step 5: Run executor tests with a fake process/runtime and ignored privileged smoke coverage**; commit `feat: isolate build execution`.
 
 ### Task 4: Implement the worker loop and API integration
 
