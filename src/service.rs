@@ -11,6 +11,7 @@ use uuid::Uuid;
 pub trait PlatformService: Send + Sync {
     fn create_project(&self, input: CreateProjectInput) -> Result<Project>;
     fn project(&self, id: Uuid) -> Result<Project>;
+    fn projects(&self) -> Result<Vec<Project>>;
     fn deploy(&self, project_id: Uuid) -> Result<Deployment>;
     fn deployments(&self, project_id: Uuid) -> Result<Vec<Deployment>>;
     fn deployment(&self, id: Uuid) -> Result<Deployment>;
@@ -85,6 +86,7 @@ impl<R: Runtime + Send, B: ImageBuilder + Send + Sync> PlatformService for Deplo
         let project = Project {
             id: Uuid::new_v4(),
             name: name.to_string(),
+            user_id: input.user_id,
             source_dir,
             base_image,
             server_command: input.server_command,
@@ -98,6 +100,10 @@ impl<R: Runtime + Send, B: ImageBuilder + Send + Sync> PlatformService for Deplo
 
     fn project(&self, id: Uuid) -> Result<Project> {
         self.store.project(id)
+    }
+
+    fn projects(&self) -> Result<Vec<Project>> {
+        self.store.load().map(|s| s.projects)
     }
 
     fn deploy(&self, project_id: Uuid) -> Result<Deployment> {
