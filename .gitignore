@@ -1,0 +1,4 @@
+/target/
+/.deploy-platform/
+/builds/
+*.tar.gz
