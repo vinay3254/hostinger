@@ -46,6 +46,50 @@ export interface IssuedToken extends ApiTokenSummary {
   raw_token: string;
 }
 
+export interface ProviderRepository {
+  id: string;
+  connection_id: string;
+  external_id: string;
+  full_name: string;
+  clone_url: string;
+  default_branch: string;
+  synced_at: string;
+}
+
+export interface ConnectProviderResponse {
+  url: string;
+  state: string;
+}
+
+export interface ProjectSourceConfig {
+  repository: ProviderRepository | null;
+  provider?: 'github' | 'gitlab' | null;
+  target_branch?: string | null;
+  webhook_url?: string | null;
+  has_webhook_secret: boolean;
+  last_delivery_at?: string | null;
+}
+
+export interface PullRequestSummary {
+  number: number;
+  head_sha: string;
+  base_branch: string;
+  action: 'opened' | 'updated' | 'closed';
+}
+
+export interface SourceEvent {
+  id: string;
+  project_id: string;
+  provider: 'github' | 'gitlab';
+  delivery_id: string;
+  kind: 'push' | 'pull_request_opened' | 'pull_request_updated' | 'pull_request_closed';
+  commit_sha: string;
+  branch?: string | null;
+  pull_request?: PullRequestSummary | null;
+  idempotency_key: string;
+  created_at: string;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -167,4 +211,30 @@ export const api = {
     request<void>(`/v1/me/api-tokens/${tokenId}`, {
       method: 'DELETE',
     }),
+
+  connectProvider: (provider: 'github' | 'gitlab') =>
+    request<ConnectProviderResponse>(`/v1/providers/${provider}/connect`),
+
+  listProviderRepositories: (provider: 'github' | 'gitlab') =>
+    request<ProviderRepository[]>(`/v1/providers/${provider}/repositories`),
+
+  getProjectSource: (projectId: string) =>
+    request<ProjectSourceConfig>(`/v1/projects/${projectId}/source`),
+
+  updateProjectSource: (
+    projectId: string,
+    input: { repository_id: string; target_branch?: string }
+  ) =>
+    request<ProjectSourceConfig>(`/v1/projects/${projectId}/source`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  disconnectProjectSource: (projectId: string) =>
+    request<void>(`/v1/projects/${projectId}/source`, {
+      method: 'DELETE',
+    }),
+
+  listProjectSourceEvents: (projectId: string) =>
+    request<SourceEvent[]>(`/v1/projects/${projectId}/source/events`),
 };
