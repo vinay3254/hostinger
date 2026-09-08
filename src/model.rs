@@ -20,10 +20,12 @@ pub enum Framework {
 #[serde(rename_all = "lowercase")]
 pub enum DeploymentStatus {
     Pending,
+    Queued,
     Building,
     Running,
     Failed,
     Stopped,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
