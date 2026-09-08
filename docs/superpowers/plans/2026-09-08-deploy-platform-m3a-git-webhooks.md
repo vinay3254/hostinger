@@ -38,9 +38,9 @@
 
 **Files:** `src/providers/mod.rs`, `src/source_events.rs`, `tests/providers_test.rs`, `src/model.rs`
 
-- [ ] **Step 1: Write failing tests** for normalized push, pull-request opened/updated/closed, branch, commit, repository, and delivery ID values.
-- [ ] **Step 2: Run `cargo test --test providers_test`** and verify the provider module is missing.
-- [ ] **Step 3: Add these types:**
+- [x] **Step 1: Write failing tests** for normalized push, pull-request opened/updated/closed, branch, commit, repository, and delivery ID values.
+- [x] **Step 2: Run `cargo test --test providers_test`** and verify the provider module is missing.
+- [x] **Step 3: Add these types:**
 
 ```rust
 pub struct RepositoryRef { pub provider: Provider, pub external_id: String, pub clone_url: Url, pub default_branch: String }
@@ -49,41 +49,41 @@ pub enum SourceEventKind { Push, PullRequestOpened, PullRequestUpdated, PullRequ
 pub struct PullRequestRef { pub number: u64, pub head_sha: String, pub base_branch: String, pub action: PullRequestAction }
 ```
 
-- [ ] **Step 4: Implement serde fixtures** for GitHub and GitLab payloads into the normalized types; reject missing repository or commit identity.
-- [ ] **Step 5: Run focused tests and commit `feat: define normalized git source events`.**
+- [x] **Step 4: Implement serde fixtures** for GitHub and GitLab payloads into the normalized types; reject missing repository or commit identity.
+- [x] **Step 5: Run focused tests and commit `feat: define normalized git source events`.**
 
 ### Task 2: Add provider installation persistence and OAuth callbacks
 
 **Files:** `migrations/0002_source_integrations.sql`, `src/providers/github.rs`, `src/providers/gitlab.rs`, `src/api.rs`, `tests/provider_oauth_test.rs`
 
-- [ ] **Step 1: Write failing tests** for OAuth state/CSRF mismatch, successful callback, encrypted token persistence, and repository listing.
-- [ ] **Step 2: Add tables** for `provider_connections`, `provider_repositories`, and encrypted token material keyed to the authenticated user.
-- [ ] **Step 3: Implement `ProviderClient`** with `begin_authorization`, `complete_authorization`, `list_repositories`, `get_commit`, and `create_webhook` methods.
-- [ ] **Step 4: Add OAuth state records** with one-time use and five-minute expiry; verify state before exchanging a code.
-- [ ] **Step 5: Add routes** `GET /v1/providers/:provider/connect`, `GET /v1/providers/:provider/callback`, and `GET /v1/providers/:provider/repositories`.
-- [ ] **Step 6: Run OAuth tests with HTTP fixtures** and commit `feat: add git provider oauth connections`.
+- [x] **Step 1: Write failing tests** for OAuth state/CSRF mismatch, successful callback, encrypted token persistence, and repository listing.
+- [x] **Step 2: Add tables** for `provider_connections`, `provider_repositories`, and encrypted token material keyed to the authenticated user.
+- [x] **Step 3: Implement `ProviderClient`** with `begin_authorization`, `complete_authorization`, `list_repositories`, `get_commit`, and `create_webhook` methods.
+- [x] **Step 4: Add OAuth state records** with one-time use and five-minute expiry; verify state before exchanging a code.
+- [x] **Step 5: Add routes** `GET /v1/providers/:provider/connect`, `GET /v1/providers/:provider/callback`, and `GET /v1/providers/:provider/repositories`.
+- [x] **Step 6: Run OAuth tests with HTTP fixtures** and commit `feat: add git provider oauth connections`.
 
 ### Task 3: Verify and normalize webhook deliveries
 
 **Files:** `src/webhooks.rs`, `src/source_events.rs`, `tests/webhooks_test.rs`, `migrations/0002_source_integrations.sql`
 
-- [ ] **Step 1: Write failing tests** for valid/invalid HMAC signatures, duplicate delivery IDs, unsupported actions, repository mismatch, and durable event creation.
-- [ ] **Step 2: Run `cargo test --test webhooks_test`** and confirm no webhook handler exists.
-- [ ] **Step 3: Implement constant-time HMAC verification** using the installation secret and raw request body; reject missing signatures with 401.
-- [ ] **Step 4: Store `provider_deliveries` before processing** with a unique `(provider, delivery_id)` constraint and return 202 for duplicates.
-- [ ] **Step 5: Normalize accepted events** into `source_events` with project ID, commit SHA, branch/PR data, and a deterministic idempotency key.
-- [ ] **Step 6: Add `POST /v1/webhooks/:provider/:project_id`** that never executes a build inline.
-- [ ] **Step 7: Run `cargo test --test webhooks_test && cargo test`** and commit `feat: ingest verified git webhooks`.
+- [x] **Step 1: Write failing tests** for valid/invalid HMAC signatures, duplicate delivery IDs, unsupported actions, repository mismatch, and durable event creation.
+- [x] **Step 2: Run `cargo test --test webhooks_test`** and confirm no webhook handler exists.
+- [x] **Step 3: Implement constant-time HMAC verification** using the installation secret and raw request body; reject missing signatures with 401.
+- [x] **Step 4: Store `provider_deliveries` before processing** with a unique `(provider, delivery_id)` constraint and return 202 for duplicates.
+- [x] **Step 5: Normalize accepted events** into `source_events` with project ID, commit SHA, branch/PR data, and a deterministic idempotency key.
+- [x] **Step 6: Add `POST /v1/webhooks/:provider/:project_id`** that never executes a build inline.
+- [x] **Step 7: Run `cargo test --test webhooks_test && cargo test`** and commit `feat: ingest verified git webhooks`.
 
 ### Task 4: Add source connection UI
 
 **Files:** `dashboard/app/projects/[projectId]/settings/source/page.tsx`, `dashboard/components/SourceConnectionCard.tsx`, `dashboard/lib/api.ts`, `dashboard/tests/source-settings.spec.ts`
 
-- [ ] **Step 1: Write failing component/E2E tests** for connect, repository selection, branch selection, connection error, and disconnect confirmation.
-- [ ] **Step 2: Implement provider selection and OAuth redirect** without exposing provider tokens to the browser.
-- [ ] **Step 3: Implement repository/branch selection** with commit preview and loading/empty/error states.
-- [ ] **Step 4: Display webhook status** and last delivery time; expose a copyable webhook URL only where an operator needs it.
-- [ ] **Step 5: Run dashboard tests/build** and commit `feat: add git source configuration ui`.
+- [x] **Step 1: Write failing component/E2E tests** for connect, repository selection, branch selection, connection error, and disconnect confirmation.
+- [x] **Step 2: Implement provider selection and OAuth redirect** without exposing provider tokens to the browser.
+- [x] **Step 3: Implement repository/branch selection** with commit preview and loading/empty/error states.
+- [x] **Step 4: Display webhook status** and last delivery time; expose a copyable webhook URL only where an operator needs it.
+- [x] **Step 5: Run dashboard tests/build** and commit `feat: add git source configuration ui`.
 
 ## M3a Acceptance Criteria
 
