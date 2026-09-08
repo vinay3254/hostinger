@@ -39,12 +39,12 @@
 
 ### Task 1: Create durable jobs and Redis Stream queue
 
-- [ ] **Step 1: Write failing tests** for priority order, duplicate enqueue idempotency, lease expiry, retry backoff, cancellation, and dead-letter transition.
-- [ ] **Step 2: Run `cargo test --test queue_test`** and confirm queue code is missing.
-- [ ] **Step 3: Add `build_jobs`, `build_attempts`, and `build_events` tables** with unique deployment IDs, attempt state, lease expiration, and terminal error fields.
-- [ ] **Step 4: Implement `BuildQueue::enqueue`, `claim`, `renew`, `ack`, `fail`, `cancel`, and `requeue_expired`** using Redis Stream `XADD`, consumer groups, and PostgreSQL state as source of truth.
-- [ ] **Step 5: Implement weighted priority selection** by publishing to priority streams and giving production a bounded lead over preview jobs.
-- [ ] **Step 6: Run queue tests with a Redis fixture or fake transport** and commit `feat: add durable build job queue`.
+- [x] **Step 1: Write failing tests** for priority order, duplicate enqueue idempotency, lease expiry, retry backoff, cancellation, and dead-letter transition.
+- [x] **Step 2: Run `cargo test --test queue_test`** and confirm queue code is missing.
+- [x] **Step 3: Add `build_jobs`, `build_attempts`, and `build_events` tables** with unique deployment IDs, attempt state, lease expiration, and terminal error fields.
+- [x] **Step 4: Implement `BuildQueue::enqueue`, `claim`, `renew`, `ack`, `fail`, `cancel`, and `requeue_expired`** using Redis Stream `XADD`, consumer groups, and PostgreSQL state as source of truth.
+- [x] **Step 5: Implement weighted priority selection** by publishing to priority streams and giving production a bounded lead over preview jobs.
+- [x] **Step 6: Run queue tests with a Redis fixture or fake transport** and commit `feat: add durable build job queue`.
 
 ### Task 2: Implement safe source checkout and framework plans
 
