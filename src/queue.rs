@@ -14,6 +14,8 @@ pub enum JobPriority {
     Preview,
 }
 
+pub type BuildPriority = JobPriority;
+
 impl JobPriority {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -253,6 +255,21 @@ impl BuildQueue {
         };
 
         Ok(record)
+    }
+
+    pub async fn enqueue_job(
+        &self,
+        deployment_id: Uuid,
+        project_id: Uuid,
+        priority: JobPriority,
+    ) -> Result<BuildJobRecord> {
+        self.enqueue(EnqueueJobInput {
+            deployment_id,
+            project_id,
+            priority,
+            max_attempts: 3,
+        })
+        .await
     }
 
     pub async fn claim(
