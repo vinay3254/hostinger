@@ -59,11 +59,11 @@
 
 ### Task 4: Add preview API and dashboard
 
-- [ ] **Step 1: Write failing API tests** for list/detail, closed preview, promote, stop, and permission errors.
-- [ ] **Step 2: Add routes** `GET /v1/projects/:id/previews`, `GET /v1/previews/:id`, `POST /v1/previews/:id/promote`, `POST /v1/previews/:id/stop`.
-- [ ] **Step 3: Implement dashboard preview list/detail** with PR title/number, commit, author, URL, status, timestamps, and actions from `FRONTEND.md`.
-- [ ] **Step 4: Add live status/log links and explicit closed/expired state.**
-- [ ] **Step 5: Run dashboard/API E2E tests and commit `feat: add preview deployment dashboard`**.
+- [x] **Step 1: Write failing API tests** for list/detail, closed preview, promote, stop, and permission errors.
+- [x] **Step 2: Add routes** `GET /v1/projects/:id/previews`, `GET /v1/previews/:id`, `POST /v1/previews/:id/promote`, `POST /v1/previews/:id/stop`.
+- [x] **Step 3: Implement dashboard preview list/detail** with PR title/number, commit, author, URL, status, timestamps, and actions from `FRONTEND.md`.
+- [x] **Step 4: Add live status/log links and explicit closed/expired state.**
+- [x] **Step 5: Run dashboard/API E2E tests and commit `feat: add preview deployment dashboard`**.
 
 ## M3c Acceptance Criteria
 
