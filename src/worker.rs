@@ -320,6 +320,90 @@ impl BuildWorker {
 
         let plan = detect_build_plan(&source_path)?;
 
+        // Cache checking
+        let force_rebuild = claimed.job.force_rebuild;
+
+        let lockfile_digest = compute_lockfile_digest(&source_path);
+        let declared_env_keys: Vec<String> = sqlx::query_scalar(
+            "SELECT key FROM environment_variables WHERE project_id = $1 ORDER BY key ASC",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
+        let cache_input = crate::cache::BuildCacheInput {
+            schema_version: "v1".to_string(),
+            framework: format!("{:?}", plan.framework).to_lowercase(),
+            toolchain: "default".to_string(),
+            build_command: format!("{} ; {}", plan.install.join(" "), plan.build.join(" "))
+                .trim()
+                .to_string(),
+            lockfile_digest,
+            declared_env_keys,
+        };
+        let cache_key = crate::cache::CacheKey::from_build_inputs(&cache_input);
+
+        let mut cache_repo = crate::cache::BuildCacheRepository::new(
+            crate::repository::DbExecutor::Pool(&self.pool),
+        );
+
+        if !force_rebuild {
+            if let Ok(Some(cached_entry)) =
+                cache_repo.get_valid(project_id, cache_key.as_str()).await
+            {
+                let cached_path = PathBuf::from(&cached_entry.storage_path);
+                if cached_path.is_file() {
+                    if let Ok(()) = self
+                        .artifact_store
+                        .verify_checksum(&cached_path, &cached_entry.artifact_checksum)
+                    {
+                        // Cache hit! Copy cached artifact for this deployment
+                        let meta = self
+                            .artifact_store
+                            .store_artifact(deployment_id, &cached_path)?;
+
+                        // Update last-used asynchronously
+                        let pool_clone = self.pool.clone();
+                        let c_key = cache_key.as_str().to_string();
+                        tokio::spawn(async move {
+                            let mut repo = crate::cache::BuildCacheRepository::new(
+                                crate::repository::DbExecutor::Pool(&pool_clone),
+                            );
+                            let _ = repo.touch_used(project_id, &c_key).await;
+                        });
+
+                        self.publish_event(
+                            claimed.job.id,
+                            deployment_id,
+                            "build.cache.checked",
+                            serde_json::json!({
+                                "hit": true,
+                                "cache_key": cache_key.as_str(),
+                                "checksum": cached_entry.artifact_checksum,
+                            }),
+                        )
+                        .await?;
+
+                        return Ok(meta);
+                    }
+                }
+            }
+        }
+
+        // Cache miss or force rebuild
+        self.publish_event(
+            claimed.job.id,
+            deployment_id,
+            "build.cache.checked",
+            serde_json::json!({
+                "hit": false,
+                "reason": if force_rebuild { "force_rebuild" } else { "cache_miss" },
+                "cache_key": cache_key.as_str(),
+            }),
+        )
+        .await?;
+
         let mut sink = DatabaseLogSink {
             pool: self.pool.clone(),
             job_id: claimed.job.id,
@@ -331,6 +415,19 @@ impl BuildWorker {
         let meta = self
             .artifact_store
             .store_artifact(deployment_id, &build_res.artifact_path)?;
+
+        // Publish to cache (failure to publish must preserve build success)
+        let toolchain = "default".to_string();
+        let store_input = crate::cache::StoreCacheEntryInput {
+            cache_key: cache_key.as_str().to_string(),
+            project_id,
+            artifact_checksum: meta.sha256.clone(),
+            size_bytes: meta.size_bytes,
+            storage_path: meta.file_path.to_string_lossy().to_string(),
+            toolchain,
+        };
+        let _ = cache_repo.store(&store_input).await;
+
         Ok(meta)
     }
 
@@ -452,4 +549,50 @@ impl LogSink for DatabaseLogSink {
         }
         Ok(())
     }
+}
+
+fn compute_lockfile_digest(source_path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let lockfiles = [
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "Gemfile.lock",
+        "poetry.lock",
+        "requirements.txt",
+    ];
+
+    let mut hasher = Sha256::new();
+    let mut found_any = false;
+    for lf in &lockfiles {
+        let path = source_path.join(lf);
+        if let Ok(contents) = fs::read(&path) {
+            hasher.update(lf.as_bytes());
+            hasher.update(&contents);
+            found_any = true;
+        }
+    }
+
+    if !found_any {
+        if let Ok(entries) = fs::read_dir(source_path) {
+            let mut paths: Vec<_> = entries.flatten().map(|e| e.path()).collect();
+            paths.sort();
+            for path in paths {
+                if let Some(name) = path.file_name() {
+                    hasher.update(name.to_string_lossy().as_bytes());
+                }
+                if let Ok(meta) = fs::metadata(&path) {
+                    hasher.update(meta.len().to_le_bytes());
+                    if path.is_file() {
+                        if let Ok(bytes) = fs::read(&path) {
+                            hasher.update(&bytes);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    hex::encode(hasher.finalize())
 }
