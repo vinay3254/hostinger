@@ -37,6 +37,27 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, className = ''
           border: '#e5e7eb',
           dot: '#9ca3af',
         };
+      case 'queued':
+        return {
+          bg: '#f5f3ff',
+          text: '#5b21b6',
+          border: '#ddd6fe',
+          dot: '#8b5cf6',
+        };
+      case 'retrying':
+        return {
+          bg: '#fff7ed',
+          text: '#9a3412',
+          border: '#fed7aa',
+          dot: '#f97316',
+        };
+      case 'cancelled':
+        return {
+          bg: '#f3f4f6',
+          text: '#4b5563',
+          border: '#d1d5db',
+          dot: '#6b7280',
+        };
       case 'pending':
       default:
         return {
