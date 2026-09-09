@@ -308,6 +308,62 @@ test.describe('Dashboard E2E Workflow with Mocked API', () => {
         }),
       });
     });
+
+    // Mock /v1/projects/proj-1234/metrics
+    await page.route('**/v1/projects/proj-1234/metrics*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          project_id: 'proj-1234',
+          range: '1h',
+          resolution: '1m',
+          start: new Date(Date.now() - 3600000).toISOString(),
+          end: new Date().toISOString(),
+          last_updated: new Date().toISOString(),
+          series: [
+            {
+              metric_name: 'request_total',
+              unit: 'count',
+              environment: 'production',
+              points: [
+                {
+                  timestamp: new Date(Date.now() - 60000).toISOString(),
+                  count: 42,
+                  value: 42,
+                  sum: 42,
+                  min: 42,
+                  max: 42,
+                  avg: 42,
+                  is_partial: true,
+                },
+              ],
+              summary: {
+                total: 42,
+                count: 42,
+                avg: 42,
+                min: 42,
+                max: 42,
+              },
+              has_data: true,
+              is_partial: true,
+            },
+          ],
+        }),
+      });
+    });
+
+    // Mock /v1/projects/proj-1234/cache/clear
+    await page.route('**/v1/projects/proj-1234/cache/clear', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          message: 'Project build cache cleared successfully',
+        }),
+      });
+    });
   });
 
   test('user logs in and views dashboard', async ({ page }) => {
@@ -362,5 +418,24 @@ test.describe('Dashboard E2E Workflow with Mocked API', () => {
     // Promote to production
     await page.click('button:has-text("Promote to Production")');
     await expect(page.getByText(/Preview promoted to production!/i)).toBeVisible();
+  });
+
+  test('user views project metrics and toggles tabular view and clears cache', async ({ page }) => {
+    // Handle browser confirm dialog
+    page.on('dialog', async (dialog) => {
+      await dialog.accept();
+    });
+
+    await page.goto('/projects/proj-1234/metrics');
+    await expect(page.getByRole('heading', { name: 'Telemetry & Metrics' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'HTTP Requests' })).toBeVisible();
+
+    // Toggle table view
+    await page.click('button:has-text("View as Tables")');
+    await expect(page.getByRole('table', { name: /Detailed tabular data for request_total/i })).toBeVisible();
+
+    // Clear cache
+    await page.click('button:has-text("Clear Build Cache")');
+    await expect(page.getByText(/Project build cache cleared successfully/i)).toBeVisible();
   });
 });
