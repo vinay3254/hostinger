@@ -404,14 +404,27 @@ impl BuildWorker {
         )
         .await?;
 
-        let mut sink = DatabaseLogSink {
-            pool: self.pool.clone(),
-            job_id: claimed.job.id,
+        let secret_fingerprints: Vec<String> =
+            sqlx::query_scalar("SELECT value FROM environment_variables WHERE project_id = $1")
+                .bind(project_id)
+                .fetch_all(&self.pool)
+                .await
+                .unwrap_or_default();
+
+        let redactor = crate::logs::Redactor::new(secret_fingerprints);
+        let storage_dir = self.workspace_root.join("logs");
+        let mut sink = crate::logs::DurableLogSink::new(
             deployment_id,
-            sequence: 0,
-        };
+            project_id,
+            self.pool.clone(),
+            redactor,
+            Some(storage_dir),
+            100,
+        );
 
         let build_res = self.executor.execute(&plan, &source_path, &mut sink)?;
+        let _ = sink.flush();
+        sink.wait_all().await;
         let meta = self
             .artifact_store
             .store_artifact(deployment_id, &build_res.artifact_path)?;
