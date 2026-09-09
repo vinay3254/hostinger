@@ -310,10 +310,16 @@ async fn list_deployments(
     Ok(Json(list))
 }
 
+#[derive(Debug, serde::Deserialize, Default)]
+pub struct DeploymentOptions {
+    pub force_rebuild: Option<bool>,
+}
+
 async fn create_deployment(
     State(state): State<ApiState>,
     auth_ctx: AuthContext,
     Path(project_id): Path<String>,
+    Query(opts): Query<DeploymentOptions>,
 ) -> Result<(StatusCode, Json<Deployment>), ApiError> {
     let id = parse_id(&project_id)?;
     let project = state.service.project(id).map_err(map_service_err)?;
@@ -321,6 +327,7 @@ async fn create_deployment(
     if !access.can_operate() {
         return Err(ApiError::Forbidden("operation on project denied".into()));
     }
+    let force_rebuild = opts.force_rebuild.unwrap_or(false);
 
     if let Some(queue) = &state.queue {
         let deployment_id = Uuid::new_v4();
@@ -338,7 +345,12 @@ async fn create_deployment(
         }
 
         queue
-            .enqueue_job(deployment_id, id, crate::queue::BuildPriority::Production)
+            .enqueue_job_with_force_rebuild(
+                deployment_id,
+                id,
+                crate::queue::BuildPriority::Production,
+                force_rebuild,
+            )
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;
 
@@ -365,7 +377,11 @@ async fn create_deployment(
                 "deployment.create",
                 "deployment",
                 deployment.id,
-                serde_json::json!({ "project_id": project.id, "status": deployment.status }),
+                serde_json::json!({
+                    "project_id": project.id,
+                    "status": deployment.status,
+                    "force_rebuild": force_rebuild,
+                }),
             )
             .await;
 
@@ -495,11 +511,13 @@ async fn cancel_deployment(
 
 async fn retry_deployment(
     State(state): State<ApiState>,
-    _auth_ctx: AuthContext,
+    auth_ctx: AuthContext,
     Path(deployment_id): Path<String>,
+    Query(opts): Query<DeploymentOptions>,
 ) -> Result<(StatusCode, Json<Deployment>), ApiError> {
     let id = parse_id(&deployment_id)?;
     let now = time::OffsetDateTime::now_utc();
+    let force_rebuild = opts.force_rebuild.unwrap_or(false);
     if let Some(queue) = &state.queue {
         if let Some(db) = &state.db {
             let proj_id_opt: Option<Uuid> =
@@ -518,7 +536,26 @@ async fn retry_deployment(
                 .await;
 
                 let _ = queue
-                    .enqueue_job(id, proj_id, crate::queue::BuildPriority::Production)
+                    .enqueue_job_with_force_rebuild(
+                        id,
+                        proj_id,
+                        crate::queue::BuildPriority::Production,
+                        force_rebuild,
+                    )
+                    .await;
+
+                let audit = AuditService::new(Some(db.clone()));
+                let _ = audit
+                    .record(
+                        auth_ctx.user_id,
+                        "deployment.retry",
+                        "deployment",
+                        id,
+                        serde_json::json!({
+                            "project_id": proj_id,
+                            "force_rebuild": force_rebuild,
+                        }),
+                    )
                     .await;
             }
         }
@@ -1270,6 +1307,54 @@ pub fn default_providers() -> Vec<Arc<dyn ProviderClient>> {
     providers
 }
 
+async fn clear_project_cache(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(project_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let id = parse_id(&project_id)?;
+    let user_id = if let Some(db) = &state.db {
+        let mut repo = db.projects();
+        let proj = repo
+            .get_project(id)
+            .await
+            .map_err(|e| ApiError::NotFound(e.to_string()))?;
+        Some(proj.user_id)
+    } else {
+        let project = state.service.project(id).map_err(map_service_err)?;
+        project.user_id
+    };
+
+    let access = ProjectAccess::new(&auth_ctx, user_id);
+    if !access.can_operate() {
+        return Err(ApiError::Forbidden("operation on project denied".into()));
+    }
+
+    if let Some(db) = &state.db {
+        let mut repo = db.cache();
+        repo.invalidate_project(id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+        let audit = AuditService::new(Some(db.clone()));
+        let _ = audit
+            .record(
+                auth_ctx.user_id,
+                "project.cache.clear",
+                "project",
+                id,
+                serde_json::json!({ "project_id": id }),
+            )
+            .await;
+    }
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "message": "Project build cache cleared",
+        "project_id": id,
+    })))
+}
+
 pub fn router_with_providers(
     service: Arc<dyn PlatformService>,
     auth: Option<AuthService>,
@@ -1345,6 +1430,10 @@ pub fn router_with_queue(
         .route(
             "/v1/projects/:project_id/previews",
             get(list_project_previews),
+        )
+        .route(
+            "/v1/projects/:project_id/cache/clear",
+            post(clear_project_cache),
         )
         .route("/v1/previews/:preview_id", get(get_preview))
         .route("/v1/previews/:preview_id/promote", post(promote_preview))
