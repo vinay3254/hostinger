@@ -877,3 +877,229 @@ async fn deployment_logs_endpoints_and_permissions() {
     assert!(log_text.contains("Starting application..."));
     assert!(log_text.contains("Warning: check config"));
 }
+
+#[tokio::test]
+async fn releases_and_rollback_endpoints_and_permissions() {
+    let (app, db, _store, _temp) = setup_app().await;
+
+    let user_a = create_test_user(
+        &db,
+        &format!("user-a-{}-rel@example.com", Uuid::new_v4().simple()),
+    )
+    .await;
+    let session_a = create_test_session(&db, user_a.id).await;
+
+    let user_b = create_test_user(
+        &db,
+        &format!("user-b-{}-rel@example.com", Uuid::new_v4().simple()),
+    )
+    .await;
+    let session_b = create_test_session(&db, user_b.id).await;
+
+    let project_id = create_test_project(
+        &db,
+        user_a.id,
+        &format!("project-rel-{}", Uuid::new_v4().simple()),
+    )
+    .await;
+
+    // Create deployment 1 (healthy predecessor)
+    let dep1_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO deployments (id, project_id, framework, status, image_path, commit_sha, target, created_at)
+         VALUES ($1, $2, 'static', 'stopped', '/img/v1.tar', 'commit-v1-stable', 'production', NOW())",
+    )
+    .bind(dep1_id)
+    .bind(project_id)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    let mut releases_ctrl = db.releases();
+    let rel1 = releases_ctrl
+        .create_release(
+            dep1_id,
+            project_id,
+            "production",
+            Some("c1".into()),
+            Some(8081),
+            Some("http://127.0.0.1:8081".into()),
+        )
+        .await
+        .unwrap();
+    let rel1 = releases_ctrl
+        .transition(
+            rel1.id,
+            rel1.version,
+            deploy_platform::releases::ReleaseStatus::HealthChecking,
+            None,
+        )
+        .await
+        .unwrap();
+    let rel1 = releases_ctrl
+        .transition(
+            rel1.id,
+            rel1.version,
+            deploy_platform::releases::ReleaseStatus::Ready,
+            None,
+        )
+        .await
+        .unwrap();
+    let rel1 = releases_ctrl
+        .transition(
+            rel1.id,
+            rel1.version,
+            deploy_platform::releases::ReleaseStatus::Active,
+            None,
+        )
+        .await
+        .unwrap();
+    let rel1 = releases_ctrl
+        .transition(
+            rel1.id,
+            rel1.version,
+            deploy_platform::releases::ReleaseStatus::Stopped,
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Create deployment 2 (current running deployment)
+    let dep2_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO deployments (id, project_id, framework, status, image_path, commit_sha, target, created_at)
+         VALUES ($1, $2, 'static', 'running', '/img/v2.tar', 'commit-v2-broken', 'production', NOW())",
+    )
+    .bind(dep2_id)
+    .bind(project_id)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    let rel2 = releases_ctrl
+        .create_release(
+            dep2_id,
+            project_id,
+            "production",
+            Some("c2".into()),
+            Some(8082),
+            Some("http://127.0.0.1:8082".into()),
+        )
+        .await
+        .unwrap();
+
+    // 1. GET /v1/deployments/:id/releases - unauthenticated -> 401
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/deployments/{}/releases", dep2_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. GET /v1/deployments/:id/releases - non-owner (user B) -> 403
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/deployments/{}/releases", dep2_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_b.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 3. GET /v1/deployments/:id/releases - owner (user A) -> 200 OK
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/deployments/{}/releases", dep2_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let releases: Vec<deploy_platform::releases::Release> = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(releases.len(), 1);
+    assert_eq!(releases[0].id, rel2.id);
+
+    // 4. GET /v1/releases/:id/events - owner (user A) -> 200 OK
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/releases/{}/events", rel1.id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let events: Vec<deploy_platform::releases::ReleaseTransitionRecord> =
+        serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(events.len(), 4);
+
+    // 5. POST /v1/deployments/:id/rollback - limited token (only project:read) -> 403
+    let auth_svc = AuthService::new(db.clone());
+    let limited_token = auth_svc
+        .issue_api_token(
+            user_a.id,
+            "read-only-token",
+            vec!["project:read".into()],
+            None,
+        )
+        .await
+        .unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/deployments/{}/rollback", dep2_id))
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", limited_token.raw_token),
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 6. POST /v1/deployments/:id/rollback - full operator (session A with *) -> 201 Created
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/deployments/{}/rollback", dep2_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let rollback_resp: deploy_platform::rollback::RollbackResult =
+        serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(rollback_resp.target.deployment_id, dep1_id);
+    assert_eq!(
+        rollback_resp.target.commit_sha.as_deref(),
+        Some("commit-v1-stable")
+    );
+}
