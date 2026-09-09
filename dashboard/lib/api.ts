@@ -16,12 +16,20 @@ export interface Project {
   active_deployment?: string | null;
 }
 
-export type DeploymentStatus = 'pending' | 'building' | 'running' | 'failed' | 'stopped';
+export type DeploymentStatus =
+  | 'pending'
+  | 'queued'
+  | 'retrying'
+  | 'building'
+  | 'running'
+  | 'failed'
+  | 'stopped'
+  | 'cancelled';
 
 export interface Deployment {
   id: string;
   project_id: string;
-  framework: 'static';
+  framework: string;
   status: DeploymentStatus;
   image_path?: string | null;
   container_id?: string | null;
@@ -30,6 +38,11 @@ export interface Deployment {
   created_at: string;
   finished_at?: string | null;
   error?: string | null;
+  commit_sha?: string | null;
+  attempt?: number;
+  worker_id?: string | null;
+  queue_wait_ms?: number | null;
+  cache_status?: string | null;
 }
 
 export interface ApiTokenSummary {
@@ -237,4 +250,14 @@ export const api = {
 
   listProjectSourceEvents: (projectId: string) =>
     request<SourceEvent[]>(`/v1/projects/${projectId}/source/events`),
+
+  cancelDeployment: (deploymentId: string) =>
+    request<Deployment>(`/v1/deployments/${deploymentId}/cancel`, {
+      method: 'POST',
+    }),
+
+  retryDeployment: (deploymentId: string) =>
+    request<Deployment>(`/v1/deployments/${deploymentId}/retry`, {
+      method: 'POST',
+    }),
 };
