@@ -2,9 +2,15 @@ import React, { useState } from 'react';
 
 interface LogViewerProps {
   logs: string;
+  isStreaming?: boolean;
+  isReconnecting?: boolean;
 }
 
-export const LogViewer: React.FC<LogViewerProps> = ({ logs }) => {
+export const LogViewer: React.FC<LogViewerProps> = ({
+  logs,
+  isStreaming = false,
+  isReconnecting = false,
+}) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -41,7 +47,40 @@ export const LogViewer: React.FC<LogViewerProps> = ({ logs }) => {
           color: '#9ca3af',
         }}
       >
-        <span>Build & Runtime Output ({lines.length} lines)</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span>Build & Runtime Output ({lines.length} lines)</span>
+          {isReconnecting ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                color: '#f59e0b',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                fontSize: '11px',
+              }}
+            >
+              ● Reconnecting...
+            </span>
+          ) : isStreaming ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                color: '#10b981',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                fontSize: '11px',
+              }}
+            >
+              ● Live streaming
+            </span>
+          ) : null}
+        </div>
         <button
           onClick={handleCopy}
           style={{
