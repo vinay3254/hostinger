@@ -54,12 +54,12 @@
 
 ### Task 3: Persist and stream build/runtime logs
 
-- [ ] **Step 1: Write failing tests** for sequence ordering, reconnect from sequence, redaction, pagination, retention deletion, and terminal stream closure.
-- [ ] **Step 2: Implement `LogSink`, `LogQuery`, and `LogStream`** with deployment/project scope and monotonic sequence numbers.
-- [ ] **Step 3: Persist log segments in object storage** and searchable metadata in PostgreSQL; rotate by size/time.
-- [ ] **Step 4: Add `GET /v1/deployments/:id/logs`, download, and stream endpoints** with auth and bounded query limits.
-- [ ] **Step 5: Add redaction middleware** for configured secret fingerprints and common credential patterns.
-- [ ] **Step 6: Run log tests and commit `feat: add durable deployment logs`**.
+- [x] **Step 1: Write failing tests** for sequence ordering, reconnect from sequence, redaction, pagination, retention deletion, and terminal stream closure.
+- [x] **Step 2: Implement `LogSink`, `LogQuery`, and `LogStream`** with deployment/project scope and monotonic sequence numbers.
+- [x] **Step 3: Persist log segments in object storage** and searchable metadata in PostgreSQL; rotate by size/time.
+- [x] **Step 4: Add `GET /v1/deployments/:id/logs`, download, and stream endpoints** with auth and bounded query limits.
+- [x] **Step 5: Add redaction middleware** for configured secret fingerprints and common credential patterns.
+- [x] **Step 6: Run log tests and commit `feat: add durable deployment logs`**.
 
 ### Task 4: Add metrics events and query API
 
