@@ -43,6 +43,10 @@ export interface Deployment {
   worker_id?: string | null;
   queue_wait_ms?: number | null;
   cache_status?: string | null;
+  cache_key?: string | null;
+  build_duration_ms?: number | null;
+  cached_duration_ms?: number | null;
+  artifact_size_bytes?: number | null;
 }
 
 export interface ApiTokenSummary {
@@ -120,6 +124,51 @@ export interface Preview {
   cleanup_attempt: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface MetricPoint {
+  timestamp: string;
+  count: number;
+  value: number;
+  sum: number;
+  min: number;
+  max: number;
+  avg: number;
+  p50?: number | null;
+  p95?: number | null;
+  p99?: number | null;
+  is_partial: boolean;
+}
+
+export interface MetricSummary {
+  total: number;
+  count: number;
+  avg: number;
+  min: number;
+  max: number;
+  p50?: number | null;
+  p95?: number | null;
+  p99?: number | null;
+}
+
+export interface MetricSeries {
+  metric_name: string;
+  unit: string;
+  environment?: string | null;
+  points: MetricPoint[];
+  summary: MetricSummary;
+  has_data: boolean;
+  is_partial: boolean;
+}
+
+export interface MetricsResponse {
+  project_id: string;
+  range: string;
+  resolution: string;
+  start: string;
+  end: string;
+  series: MetricSeries[];
+  last_updated: string;
 }
 
 export class ApiError extends Error {
@@ -295,4 +344,25 @@ export const api = {
     request<Preview>(`/v1/previews/${previewId}/stop`, {
       method: 'POST',
     }),
+
+  getProjectMetrics: (
+    projectId: string,
+    params?: { metric?: string; range?: string; resolution?: string; environment?: string }
+  ) => {
+    const sp = new URLSearchParams();
+    if (params?.metric) sp.set('metric', params.metric);
+    if (params?.range) sp.set('range', params.range);
+    if (params?.resolution) sp.set('resolution', params.resolution);
+    if (params?.environment) sp.set('environment', params.environment);
+    const qs = sp.toString();
+    return request<MetricsResponse>(`/v1/projects/${projectId}/metrics${qs ? `?${qs}` : ''}`);
+  },
+
+  clearProjectCache: (projectId: string) =>
+    request<{ success: boolean; message: string }>(`/v1/projects/${projectId}/cache/clear`, {
+      method: 'POST',
+    }),
+
+  downloadDeploymentLogsUrl: (deploymentId: string) =>
+    `${getApiBase()}/v1/deployments/${deploymentId}/logs/download`,
 };
