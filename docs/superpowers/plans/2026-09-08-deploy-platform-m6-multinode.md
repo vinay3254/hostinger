@@ -54,11 +54,11 @@
 
 ### Task 3: Implement agent process
 
-- [ ] **Step 1: Write failing agent tests** using a fake runtime for create/start/stop/logs/stats and cancellation.
-- [ ] **Step 2: Implement agent server** that maps only protocol commands to the runtime trait and applies per-release resource limits.
-- [ ] **Step 3: Add graceful shutdown** that stops accepting new releases and reports draining state.
-- [ ] **Step 4: Add installation/configuration docs** for node identity, endpoint, credentials, and health checks.
-- [ ] **Step 5: Run agent tests and commit `feat: add minidock node agent`**.
+- [x] **Step 1: Write failing agent tests** using a fake runtime for create/start/stop/logs/stats and cancellation.
+- [x] **Step 2: Implement agent server** that maps only protocol commands to the runtime trait and applies per-release resource limits.
+- [x] **Step 3: Add graceful shutdown** that stops accepting new releases and reports draining state.
+- [x] **Step 4: Add installation/configuration docs** for node identity, endpoint, credentials, and health checks.
+- [x] **Step 5: Run agent tests and commit `feat: add minidock node agent`**.
 
 ### Task 4: Implement scheduler placement and rescheduling
 
