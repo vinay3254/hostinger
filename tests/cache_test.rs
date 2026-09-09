@@ -189,15 +189,15 @@ async fn build_cache_repository_crud_and_invalidation() {
     assert!(!entry.is_invalidated);
 
     // 2. Fetch valid cache entry -> Found
-    let valid = repo.get_valid(&cache_key).await.unwrap();
+    let valid = repo.get_valid(project_id, &cache_key).await.unwrap();
     assert!(valid.is_some());
     assert_eq!(valid.unwrap().id, entry.id);
 
     // 3. Invalidate specific cache key
-    repo.invalidate(&cache_key).await.unwrap();
+    repo.invalidate(project_id, &cache_key).await.unwrap();
 
     // 4. Fetch valid cache entry -> None (invalidated)
-    let after_inv = repo.get_valid(&cache_key).await.unwrap();
+    let after_inv = repo.get_valid(project_id, &cache_key).await.unwrap();
     assert!(after_inv.is_none());
 
     // 5. Store another cache entry for the project
@@ -213,9 +213,17 @@ async fn build_cache_repository_crud_and_invalidation() {
     .await
     .unwrap();
 
-    assert!(repo.get_valid(&cache_key_2).await.unwrap().is_some());
+    assert!(repo
+        .get_valid(project_id, &cache_key_2)
+        .await
+        .unwrap()
+        .is_some());
 
     // 6. Invalidate all cache entries for project
     repo.invalidate_project(project_id).await.unwrap();
-    assert!(repo.get_valid(&cache_key_2).await.unwrap().is_none());
+    assert!(repo
+        .get_valid(project_id, &cache_key_2)
+        .await
+        .unwrap()
+        .is_none());
 }
