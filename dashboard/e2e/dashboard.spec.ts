@@ -241,6 +241,73 @@ test.describe('Dashboard E2E Workflow with Mocked API', () => {
         ]),
       });
     });
+
+    // Mock /v1/projects/proj-1234/previews
+    await page.route('**/v1/projects/proj-1234/previews', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'prev-1234',
+            project_id: 'proj-1234',
+            provider: 'github',
+            pr_number: 42,
+            head_sha: 'a1b2c3d4e5f6',
+            base_branch: 'main',
+            head_branch: 'feature/e2e',
+            deployment_id: 'dep-1234',
+            hostname: 'e2e-project-pr-42.preview.local',
+            status: 'ready',
+            closed_at: null,
+            cleanup_attempt: 0,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ]),
+      });
+    });
+
+    // Mock /v1/previews/prev-1234
+    await page.route('**/v1/previews/prev-1234', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'prev-1234',
+          project_id: 'proj-1234',
+          provider: 'github',
+          pr_number: 42,
+          head_sha: 'a1b2c3d4e5f6',
+          base_branch: 'main',
+          head_branch: 'feature/e2e',
+          deployment_id: 'dep-1234',
+          hostname: 'e2e-project-pr-42.preview.local',
+          status: 'ready',
+          closed_at: null,
+          cleanup_attempt: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+    });
+
+    // Mock /v1/previews/prev-1234/promote
+    await page.route('**/v1/previews/prev-1234/promote', async (route) => {
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: 'dep-prod-999',
+          project_id: 'proj-1234',
+          framework: 'static',
+          status: 'queued',
+          created_at: new Date().toISOString(),
+          commit_sha: 'a1b2c3d4e5f6',
+          target: 'production',
+        }),
+      });
+    });
   });
 
   test('user logs in and views dashboard', async ({ page }) => {
@@ -281,10 +348,19 @@ test.describe('Dashboard E2E Workflow with Mocked API', () => {
     await expect(page.getByText('Active (Configured)')).toBeVisible();
   });
 
-  test('user views previews and source events', async ({ page }) => {
+  test('user views previews and inspects preview details and promotes', async ({ page }) => {
     await page.goto('/projects/proj-1234/previews');
-    await expect(page.getByRole('heading', { name: 'Pull Request Previews & Source Events' })).toBeVisible();
-    await expect(page.getByText('Push')).toBeVisible();
-    await expect(page.getByText('a1b2c3d4')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Pull Request Previews' })).toBeVisible();
+    await expect(page.getByText('PR #42')).toBeVisible();
+    await expect(page.getByText('e2e-project-pr-42.preview.local')).toBeVisible();
+
+    // Click details
+    await page.click('a:has-text("Details")');
+    await expect(page.getByRole('heading', { name: 'Preview: PR #42' })).toBeVisible();
+    await expect(page.getByText(/Open Preview/i)).toBeVisible();
+
+    // Promote to production
+    await page.click('button:has-text("Promote to Production")');
+    await expect(page.getByText(/Preview promoted to production!/i)).toBeVisible();
   });
 });
