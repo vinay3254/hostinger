@@ -103,6 +103,25 @@ export interface SourceEvent {
   created_at: string;
 }
 
+export type PreviewStatus = 'building' | 'ready' | 'failed' | 'closed';
+
+export interface Preview {
+  id: string;
+  project_id: string;
+  provider: string;
+  pr_number: number;
+  head_sha: string;
+  base_branch: string;
+  head_branch: string;
+  deployment_id?: string | null;
+  hostname: string;
+  status: PreviewStatus;
+  closed_at?: string | null;
+  cleanup_attempt: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -258,6 +277,22 @@ export const api = {
 
   retryDeployment: (deploymentId: string) =>
     request<Deployment>(`/v1/deployments/${deploymentId}/retry`, {
+      method: 'POST',
+    }),
+
+  listProjectPreviews: (projectId: string) =>
+    request<Preview[]>(`/v1/projects/${projectId}/previews`),
+
+  getPreview: (previewId: string) =>
+    request<Preview>(`/v1/previews/${previewId}`),
+
+  promotePreview: (previewId: string) =>
+    request<Deployment>(`/v1/previews/${previewId}/promote`, {
+      method: 'POST',
+    }),
+
+  stopPreview: (previewId: string) =>
+    request<Preview>(`/v1/previews/${previewId}/stop`, {
       method: 'POST',
     }),
 };
