@@ -38,11 +38,11 @@
 
 ### Task 1: Define cache keys and artifact storage
 
-- [ ] **Step 1: Write failing tests** for stable key ordering, source/config changes producing different keys, secret exclusion, artifact checksum mismatch, and cache schema versioning.
-- [ ] **Step 2: Implement `CacheKey::from_build_inputs`** using canonical JSON plus SHA-256; include framework/toolchain/config/lockfile digest and declared env key/version metadata.
-- [ ] **Step 3: Add cache/artifact tables** with key, checksum, size, storage URI, toolchain, created/last-used, and invalidation status.
-- [ ] **Step 4: Implement `ArtifactStore`** with atomic upload, checksum verification, scoped paths, and a filesystem test adapter.
-- [ ] **Step 5: Run tests and commit `feat: add content addressed build cache`**.
+- [x] **Step 1: Write failing tests** for stable key ordering, source/config changes producing different keys, secret exclusion, artifact checksum mismatch, and cache schema versioning.
+- [x] **Step 2: Implement `CacheKey::from_build_inputs`** using canonical JSON plus SHA-256; include framework/toolchain/config/lockfile digest and declared env key/version metadata.
+- [x] **Step 3: Add cache/artifact tables** with key, checksum, size, storage URI, toolchain, created/last-used, and invalidation status.
+- [x] **Step 4: Implement `ArtifactStore`** with atomic upload, checksum verification, scoped paths, and a filesystem test adapter.
+- [x] **Step 5: Run tests and commit `feat: add content addressed build cache`**.
 
 ### Task 2: Integrate cache lookup and publish into workers
 
