@@ -71,6 +71,8 @@ fn updating_deployment_persists_status() {
         created_at: OffsetDateTime::now_utc(),
         finished_at: None,
         error: None,
+        commit_sha: None,
+        target: None,
     };
     store.insert_project(project.clone()).unwrap();
     store.insert_deployment(deployment.clone()).unwrap();
