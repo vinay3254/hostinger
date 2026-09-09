@@ -650,3 +650,102 @@ async fn preview_api_endpoints_and_permissions() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn project_cache_clear_api_test() {
+    let (app, db, _store, _temp) = setup_app().await;
+
+    // Register User A and User B
+    let user_a = create_test_user(
+        &db,
+        &format!("user-a-{}-cache@example.com", Uuid::new_v4().simple()),
+    )
+    .await;
+    let session_a = create_test_session(&db, user_a.id).await;
+
+    let user_b = create_test_user(
+        &db,
+        &format!("user-b-{}-cache@example.com", Uuid::new_v4().simple()),
+    )
+    .await;
+    let session_b = create_test_session(&db, user_b.id).await;
+
+    // Create Project for User A
+    let project_id = create_test_project(
+        &db,
+        user_a.id,
+        &format!("project-cache-{}", Uuid::new_v4().simple()),
+    )
+    .await;
+
+    // Seed a valid cache entry for this project
+    let mut cache_repo = db.cache();
+    let entry = cache_repo
+        .store(&deploy_platform::cache::StoreCacheEntryInput {
+            cache_key: "test-cache-key-1".to_string(),
+            project_id,
+            artifact_checksum: "a".repeat(64),
+            size_bytes: 1234,
+            storage_path: "/tmp/fake".to_string(),
+            toolchain: "default".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(!entry.is_invalidated);
+
+    // 1. Unauthenticated -> 401 Unauthorized
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/projects/{}/cache/clear", project_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. User B (different owner) -> 403 Forbidden
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/projects/{}/cache/clear", project_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_b.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 3. User A (owner) -> 200 OK
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/projects/{}/cache/clear", project_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 4. Verify cache entry is now invalidated
+    let valid_cache = cache_repo
+        .get_valid(project_id, "test-cache-key-1")
+        .await
+        .unwrap();
+    assert!(valid_cache.is_none());
+
+    // 5. Verify audit log entry
+    let mut audits = db.audits();
+    let events = audits.list_by_user(user_a.id).await.unwrap();
+    assert!(events.iter().any(|e| e.action == "project.cache.clear"));
+}
