@@ -55,10 +55,18 @@ impl ArtifactStore {
 
         let target_path = self.artifact_path(deployment_id);
         if source_archive != target_path {
-            fs::copy(source_archive, &target_path).with_context(|| {
+            let tmp_path = target_dir.join(format!("artifact.tmp.{}", Uuid::new_v4().simple()));
+            fs::copy(source_archive, &tmp_path).with_context(|| {
                 format!(
                     "failed to copy artifact from {} to {}",
                     source_archive.display(),
+                    tmp_path.display()
+                )
+            })?;
+            fs::rename(&tmp_path, &target_path).with_context(|| {
+                format!(
+                    "failed to rename atomic artifact from {} to {}",
+                    tmp_path.display(),
                     target_path.display()
                 )
             })?;
@@ -68,18 +76,7 @@ impl ArtifactStore {
             .with_context(|| format!("failed to read metadata of {}", target_path.display()))?;
         let size_bytes = metadata.len();
 
-        let mut file = File::open(&target_path)
-            .with_context(|| format!("failed to open {}", target_path.display()))?;
-        let mut hasher = Sha256::new();
-        let mut buffer = [0u8; 8192];
-        loop {
-            let n = file.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buffer[..n]);
-        }
-        let sha256 = hex::encode(hasher.finalize());
+        let sha256 = self.compute_sha256(&target_path)?;
 
         Ok(ArtifactMeta {
             id: Uuid::new_v4(),
@@ -89,5 +86,34 @@ impl ArtifactStore {
             sha256,
             created_at: OffsetDateTime::now_utc(),
         })
+    }
+
+    pub fn compute_sha256(&self, path: &Path) -> Result<String> {
+        let mut file = File::open(path)
+            .with_context(|| format!("failed to open file for checksum: {}", path.display()))?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 8192];
+        loop {
+            let n = file.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buffer[..n]);
+        }
+        Ok(hex::encode(hasher.finalize()))
+    }
+
+    pub fn verify_checksum(&self, path: &Path, expected_sha256: &str) -> Result<()> {
+        let actual = self.compute_sha256(path)?;
+        if actual.eq_ignore_ascii_case(expected_sha256) {
+            Ok(())
+        } else {
+            anyhow::bail!(
+                "checksum mismatch for {}: expected {}, got {}",
+                path.display(),
+                expected_sha256,
+                actual
+            );
+        }
     }
 }
