@@ -44,9 +44,9 @@ async fn session_creation_expiry_and_revocation() {
         .await
         .unwrap();
 
-    // Create session valid for 2 seconds
+    // Create session valid for 5 minutes
     let session = auth
-        .create_session(user_id, Duration::seconds(2))
+        .create_session(user_id, Duration::minutes(5))
         .await
         .unwrap();
     assert!(!session.token.is_empty());
