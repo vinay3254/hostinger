@@ -38,11 +38,11 @@
 
 ### Task 1: Define agent protocol and node identity
 
-- [ ] **Step 1: Write failing protocol tests** for version mismatch, operation ID dedupe, invalid signature, forbidden command, and bounded request size.
-- [ ] **Step 2: Define RPCs:** `RegisterNode`, `Heartbeat`, `CreateRelease`, `StartRelease`, `StopRelease`, `DrainRelease`, `ReleaseLogs`, `ReleaseStats`, and `Health`.
-- [ ] **Step 3: Add node identity/certificate/token storage** with rotation and revocation state.
-- [ ] **Step 4: Implement protocol serialization and auth interceptors**; reject unknown versions and replayed operation IDs.
-- [ ] **Step 5: Run tests and commit `feat: define authenticated node agent protocol`**.
+- [x] **Step 1: Write failing protocol tests** for version mismatch, operation ID dedupe, invalid signature, forbidden command, and bounded request size.
+- [x] **Step 2: Define RPCs:** `RegisterNode`, `Heartbeat`, `CreateRelease`, `StartRelease`, `StopRelease`, `DrainRelease`, `ReleaseLogs`, `ReleaseStats`, and `Health`.
+- [x] **Step 3: Add node identity/certificate/token storage** with rotation and revocation state.
+- [x] **Step 4: Implement protocol serialization and auth interceptors**; reject unknown versions and replayed operation IDs.
+- [x] **Step 5: Run tests and commit `feat: define authenticated node agent protocol`**.
 
 ### Task 2: Implement node registry and heartbeats
 
