@@ -81,6 +81,8 @@ pub struct BuildJobRecord {
     pub status: JobStatus,
     pub attempt: i32,
     pub max_attempts: i32,
+    #[serde(default)]
+    pub force_rebuild: bool,
     pub lease_owner: Option<String>,
     #[serde(default, with = "time::serde::rfc3339::option")]
     pub lease_expires_at: Option<OffsetDateTime>,
@@ -97,6 +99,7 @@ pub struct EnqueueJobInput {
     pub project_id: Uuid,
     pub priority: JobPriority,
     pub max_attempts: i32,
+    pub force_rebuild: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -187,10 +190,10 @@ impl BuildQueue {
 
         // 1. Insert or get existing job from postgres (idempotent by deployment_id)
         let query = r#"
-            INSERT INTO build_jobs (id, deployment_id, project_id, queue_name, priority, status, max_attempts, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, $7)
+            INSERT INTO build_jobs (id, deployment_id, project_id, queue_name, priority, status, max_attempts, force_rebuild, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, 'queued', $6, $7, $8, $8)
             ON CONFLICT (deployment_id) DO NOTHING
-            RETURNING id, deployment_id, project_id, priority, status, attempt, max_attempts, lease_owner, lease_expires_at, last_error, created_at, updated_at
+            RETURNING id, deployment_id, project_id, priority, status, attempt, max_attempts, force_rebuild, lease_owner, lease_expires_at, last_error, created_at, updated_at
         "#;
 
         let row_opt = sqlx::query(query)
@@ -200,6 +203,7 @@ impl BuildQueue {
             .bind(&self.stream_prefix)
             .bind(input.priority.as_str())
             .bind(input.max_attempts)
+            .bind(input.force_rebuild)
             .bind(now)
             .fetch_optional(self.db.pool())
             .await
@@ -216,6 +220,7 @@ impl BuildQueue {
                 status: status_str.parse()?,
                 attempt: row.get("attempt"),
                 max_attempts: row.get("max_attempts"),
+                force_rebuild: row.try_get("force_rebuild").unwrap_or(false),
                 lease_owner: row.get("lease_owner"),
                 lease_expires_at: row.get("lease_expires_at"),
                 last_error: row.get("last_error"),
@@ -268,6 +273,24 @@ impl BuildQueue {
             project_id,
             priority,
             max_attempts: 3,
+            force_rebuild: false,
+        })
+        .await
+    }
+
+    pub async fn enqueue_job_with_force_rebuild(
+        &self,
+        deployment_id: Uuid,
+        project_id: Uuid,
+        priority: JobPriority,
+        force_rebuild: bool,
+    ) -> Result<BuildJobRecord> {
+        self.enqueue(EnqueueJobInput {
+            deployment_id,
+            project_id,
+            priority,
+            max_attempts: 3,
+            force_rebuild,
         })
         .await
     }
@@ -324,7 +347,7 @@ impl BuildQueue {
                     lease_expires_at = $3,
                     updated_at = $4
                 WHERE id = $1 AND status IN ('queued', 'failed') AND attempt < max_attempts
-                RETURNING id, deployment_id, project_id, priority, status, attempt, max_attempts, lease_owner, lease_expires_at, last_error, created_at, updated_at
+                RETURNING id, deployment_id, project_id, priority, status, attempt, max_attempts, force_rebuild, lease_owner, lease_expires_at, last_error, created_at, updated_at
             "#;
 
             let row_opt = sqlx::query(query)
@@ -347,6 +370,7 @@ impl BuildQueue {
                     status: status_str.parse()?,
                     attempt: row.get("attempt"),
                     max_attempts: row.get("max_attempts"),
+                    force_rebuild: row.try_get("force_rebuild").unwrap_or(false),
                     lease_owner: row.get("lease_owner"),
                     lease_expires_at: row.get("lease_expires_at"),
                     last_error: row.get("last_error"),
@@ -683,7 +707,7 @@ impl BuildQueue {
 
     pub async fn get_job(&self, job_id: Uuid) -> Result<Option<BuildJobRecord>> {
         let query = r#"
-            SELECT id, deployment_id, project_id, priority, status, attempt, max_attempts, lease_owner, lease_expires_at, last_error, created_at, updated_at
+            SELECT id, deployment_id, project_id, priority, status, attempt, max_attempts, force_rebuild, lease_owner, lease_expires_at, last_error, created_at, updated_at
             FROM build_jobs
             WHERE id = $1
         "#;
@@ -707,6 +731,7 @@ impl BuildQueue {
             status: status_str.parse()?,
             attempt: row.get("attempt"),
             max_attempts: row.get("max_attempts"),
+            force_rebuild: row.try_get("force_rebuild").unwrap_or(false),
             lease_owner: row.get("lease_owner"),
             lease_expires_at: row.get("lease_expires_at"),
             last_error: row.get("last_error"),
@@ -720,7 +745,7 @@ impl BuildQueue {
         deployment_id: Uuid,
     ) -> Result<Option<BuildJobRecord>> {
         let query = r#"
-            SELECT id, deployment_id, project_id, priority, status, attempt, max_attempts, lease_owner, lease_expires_at, last_error, created_at, updated_at
+            SELECT id, deployment_id, project_id, priority, status, attempt, max_attempts, force_rebuild, lease_owner, lease_expires_at, last_error, created_at, updated_at
             FROM build_jobs
             WHERE deployment_id = $1
         "#;
@@ -744,6 +769,7 @@ impl BuildQueue {
             status: status_str.parse()?,
             attempt: row.get("attempt"),
             max_attempts: row.get("max_attempts"),
+            force_rebuild: row.try_get("force_rebuild").unwrap_or(false),
             lease_owner: row.get("lease_owner"),
             lease_expires_at: row.get("lease_expires_at"),
             last_error: row.get("last_error"),
