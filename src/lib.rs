@@ -16,12 +16,14 @@ pub mod preview_events;
 pub mod previews;
 pub mod providers;
 pub mod queue;
+pub mod releases;
 pub mod repository;
 pub mod runtime;
 pub mod service;
 pub mod source_checkout;
 pub mod source_events;
 pub mod store;
+pub mod traffic;
 pub mod webhooks;
 pub mod worker;
 
