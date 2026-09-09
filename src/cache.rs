@@ -104,7 +104,7 @@ impl<'a> BuildCacheRepository<'a> {
                 created_at, last_used_at, is_invalidated
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, false)
-            ON CONFLICT (cache_key) DO UPDATE SET
+            ON CONFLICT (project_id, cache_key) DO UPDATE SET
                 artifact_checksum = EXCLUDED.artifact_checksum,
                 size_bytes = EXCLUDED.size_bytes,
                 storage_path = EXCLUDED.storage_path,
@@ -135,49 +135,58 @@ impl<'a> BuildCacheRepository<'a> {
         map_row_to_cache_entry(&row)
     }
 
-    pub async fn get_valid(&mut self, cache_key: &str) -> Result<Option<BuildCacheEntry>> {
+    pub async fn get_valid(
+        &mut self,
+        project_id: Uuid,
+        cache_key: &str,
+    ) -> Result<Option<BuildCacheEntry>> {
         let query = r#"
             SELECT
                 id, cache_key, project_id, artifact_checksum, size_bytes, storage_path, toolchain,
                 created_at, last_used_at, is_invalidated
             FROM build_cache
-            WHERE cache_key = $1 AND is_invalidated = false
+            WHERE project_id = $1 AND cache_key = $2 AND is_invalidated = false
         "#;
 
         let row_opt = self
             .executor
-            .fetch_optional(sqlx::query(query).bind(cache_key))
+            .fetch_optional(sqlx::query(query).bind(project_id).bind(cache_key))
             .await
             .context("failed to query build cache")?;
 
         row_opt.map(|r| map_row_to_cache_entry(&r)).transpose()
     }
 
-    pub async fn touch_used(&mut self, cache_key: &str) -> Result<()> {
+    pub async fn touch_used(&mut self, project_id: Uuid, cache_key: &str) -> Result<()> {
         let now = OffsetDateTime::now_utc();
         let query = r#"
             UPDATE build_cache
-            SET last_used_at = $2
-            WHERE cache_key = $1
+            SET last_used_at = $3
+            WHERE project_id = $1 AND cache_key = $2
         "#;
 
         self.executor
-            .execute(sqlx::query(query).bind(cache_key).bind(now))
+            .execute(
+                sqlx::query(query)
+                    .bind(project_id)
+                    .bind(cache_key)
+                    .bind(now),
+            )
             .await
             .context("failed to touch cache entry")?;
 
         Ok(())
     }
 
-    pub async fn invalidate(&mut self, cache_key: &str) -> Result<()> {
+    pub async fn invalidate(&mut self, project_id: Uuid, cache_key: &str) -> Result<()> {
         let query = r#"
             UPDATE build_cache
             SET is_invalidated = true
-            WHERE cache_key = $1
+            WHERE project_id = $1 AND cache_key = $2
         "#;
 
         self.executor
-            .execute(sqlx::query(query).bind(cache_key))
+            .execute(sqlx::query(query).bind(project_id).bind(cache_key))
             .await
             .context("failed to invalidate cache entry")?;
 
