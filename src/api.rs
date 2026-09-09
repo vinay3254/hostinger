@@ -354,6 +354,8 @@ async fn create_deployment(
             error: None,
             created_at: now,
             finished_at: None,
+            commit_sha: None,
+            target: Some("production".into()),
         };
 
         let audit = AuditService::new(state.db.clone());
@@ -485,6 +487,8 @@ async fn cancel_deployment(
         error: None,
         created_at: time::OffsetDateTime::now_utc(),
         finished_at: Some(time::OffsetDateTime::now_utc()),
+        commit_sha: None,
+        target: None,
     });
     Ok(Json(deployment))
 }
@@ -531,6 +535,8 @@ async fn retry_deployment(
         error: None,
         created_at: now,
         finished_at: None,
+        commit_sha: None,
+        target: Some("production".into()),
     };
     Ok((StatusCode::ACCEPTED, Json(deployment)))
 }
