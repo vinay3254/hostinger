@@ -9,6 +9,7 @@ pub mod db;
 pub mod detector;
 pub mod framework;
 pub mod hostname;
+pub mod logs;
 pub mod model;
 pub mod preview_events;
 pub mod previews;
