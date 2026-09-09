@@ -162,4 +162,178 @@ impl PreviewService {
         let name: String = sqlx::Row::get(&row, "name");
         Ok(name)
     }
+
+    pub async fn record_build_success(
+        &self,
+        preview_id: Uuid,
+        deployment_id: Uuid,
+        port: u16,
+        url: &str,
+        image_path: &str,
+    ) -> Result<()> {
+        let now = time::OffsetDateTime::now_utc();
+        sqlx::query(
+            "UPDATE deployments
+             SET status = 'running', port = $1, url = $2, image_path = $3, finished_at = $4
+             WHERE id = $5",
+        )
+        .bind(port as i32)
+        .bind(url)
+        .bind(image_path)
+        .bind(now)
+        .bind(deployment_id)
+        .execute(self.db.pool())
+        .await
+        .context("failed to update deployment on preview build success")?;
+
+        let mut repo = PreviewRepository::new(self.db.pool().into());
+        repo.update_status_and_deployment(preview_id, PreviewStatus::Ready, Some(deployment_id))
+            .await
+            .context("failed to mark preview ready")?;
+
+        Ok(())
+    }
+
+    pub async fn record_build_failure(
+        &self,
+        preview_id: Uuid,
+        failed_deployment_id: Uuid,
+        error: &str,
+    ) -> Result<()> {
+        let now = time::OffsetDateTime::now_utc();
+        sqlx::query(
+            "UPDATE deployments
+             SET status = 'failed', error = $1, finished_at = $2
+             WHERE id = $3",
+        )
+        .bind(error)
+        .bind(now)
+        .bind(failed_deployment_id)
+        .execute(self.db.pool())
+        .await
+        .context("failed to update deployment on preview build failure")?;
+
+        let mut repo = PreviewRepository::new(self.db.pool().into());
+        let Some(preview) = repo.find_by_id(preview_id).await? else {
+            return Ok(());
+        };
+
+        // If the preview currently points to the failed deployment, mark it failed.
+        // If it points to a prior healthy deployment, preserve the prior deployment and Ready status!
+        if preview.deployment_id == Some(failed_deployment_id) {
+            repo.update_status_and_deployment(preview_id, PreviewStatus::Failed, None)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn record_health_failure(
+        &self,
+        preview_id: Uuid,
+        deployment_id: Uuid,
+        error: &str,
+    ) -> Result<()> {
+        self.record_build_failure(preview_id, deployment_id, error)
+            .await
+    }
+
+    pub async fn teardown_preview(&self, preview_id: Uuid) -> Result<()> {
+        let mut repo = PreviewRepository::new(self.db.pool().into());
+        let Some(preview) = repo.find_by_id(preview_id).await? else {
+            return Ok(());
+        };
+
+        if preview.status == PreviewStatus::Closed {
+            return Ok(());
+        }
+
+        let now = time::OffsetDateTime::now_utc();
+        if let Some(dep_id) = preview.deployment_id {
+            if let Some(queue) = &self.queue {
+                let _ = queue.cancel(dep_id).await;
+            }
+
+            sqlx::query(
+                "UPDATE deployments
+                 SET status = 'stopped', finished_at = $1
+                 WHERE id = $2",
+            )
+            .bind(now)
+            .bind(dep_id)
+            .execute(self.db.pool())
+            .await
+            .context("failed to stop preview deployment")?;
+        }
+
+        repo.mark_closed(preview_id, now)
+            .await
+            .context("failed to mark preview closed during teardown")?;
+
+        Ok(())
+    }
+
+    pub async fn promote_to_production(
+        &self,
+        preview_id: Uuid,
+    ) -> Result<crate::model::Deployment> {
+        let mut repo = PreviewRepository::new(self.db.pool().into());
+        let preview = repo
+            .find_by_id(preview_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("preview not found: {preview_id}"))?;
+
+        if preview.status == PreviewStatus::Closed {
+            anyhow::bail!("cannot promote a closed preview");
+        }
+
+        let new_dep_id = Uuid::new_v4();
+        let now = time::OffsetDateTime::now_utc();
+
+        let image_path: Option<String> = if let Some(dep_id) = preview.deployment_id {
+            sqlx::query_scalar("SELECT image_path FROM deployments WHERE id = $1")
+                .bind(dep_id)
+                .fetch_optional(self.db.pool())
+                .await?
+                .flatten()
+        } else {
+            None
+        };
+
+        sqlx::query(
+            "INSERT INTO deployments (id, project_id, framework, status, image_path, created_at, commit_sha, target)
+             VALUES ($1, $2, 'static', 'queued', $3, $4, $5, 'production')",
+        )
+        .bind(new_dep_id)
+        .bind(preview.project_id)
+        .bind(&image_path)
+        .bind(now)
+        .bind(&preview.head_sha)
+        .execute(self.db.pool())
+        .await
+        .context("failed to create production deployment during promotion")?;
+
+        if let Some(queue) = &self.queue {
+            queue
+                .enqueue_job(new_dep_id, preview.project_id, BuildPriority::Production)
+                .await
+                .context("failed to enqueue production deployment job")?;
+        }
+
+        Ok(crate::model::Deployment {
+            id: new_dep_id,
+            project_id: preview.project_id,
+            framework: crate::model::Framework::Static,
+            status: crate::model::DeploymentStatus::Queued,
+            image_path: image_path.map(std::path::PathBuf::from),
+            container_id: None,
+            port: None,
+            url: None,
+            created_at: now,
+            finished_at: None,
+            error: None,
+            commit_sha: Some(preview.head_sha),
+            target: Some("production".into()),
+        })
+    }
 }
