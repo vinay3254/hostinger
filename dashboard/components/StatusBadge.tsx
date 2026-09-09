@@ -2,7 +2,7 @@ import React from 'react';
 import { DeploymentStatus } from '../lib/api';
 
 interface StatusBadgeProps {
-  status: DeploymentStatus;
+  status: DeploymentStatus | 'ready' | 'closed' | string;
   className?: string;
 }
 
@@ -10,6 +10,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, className = ''
   const getColors = () => {
     switch (status) {
       case 'running':
+      case 'ready':
         return {
           bg: '#ecfdf5',
           text: '#065f46',
@@ -31,6 +32,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, className = ''
           dot: '#ef4444',
         };
       case 'stopped':
+      case 'closed':
         return {
           bg: '#f3f4f6',
           text: '#374151',
