@@ -1062,6 +1062,185 @@ async fn list_project_source_events(
     Ok(Json(events))
 }
 
+async fn get_project_user_id(state: &ApiState, project_id: Uuid) -> Result<Option<Uuid>, ApiError> {
+    if let Ok(p) = state.service.project(project_id) {
+        return Ok(p.user_id);
+    }
+    if let Some(db) = &state.db {
+        let mut projects_repo = db.projects();
+        if let Ok(pr) = projects_repo.get_project(project_id).await {
+            return Ok(Some(pr.user_id));
+        }
+    }
+    Err(ApiError::NotFound(format!(
+        "project not found: {project_id}"
+    )))
+}
+
+async fn list_project_previews(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(project_id): Path<String>,
+) -> Result<Json<Vec<crate::previews::Preview>>, ApiError> {
+    let id = parse_id(&project_id)?;
+    let owner_id = get_project_user_id(&state, id).await?;
+    let access = ProjectAccess::new(&auth_ctx, owner_id);
+    if !access.can_read() {
+        return Err(ApiError::Forbidden(
+            "access to project previews denied".into(),
+        ));
+    }
+    let db = state
+        .db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+    let mut repo = db.previews();
+    let previews = repo
+        .list_by_project(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(previews))
+}
+
+async fn get_preview(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(preview_id): Path<String>,
+) -> Result<Json<crate::previews::Preview>, ApiError> {
+    let id = parse_id(&preview_id)?;
+    let db = state
+        .db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+    let mut repo = db.previews();
+    let preview = repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound(format!("preview not found: {id}")))?;
+
+    let owner_id = get_project_user_id(&state, preview.project_id).await?;
+    let access = ProjectAccess::new(&auth_ctx, owner_id);
+    if !access.can_read() {
+        return Err(ApiError::Forbidden("access to preview denied".into()));
+    }
+    Ok(Json(preview))
+}
+
+async fn promote_preview(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(preview_id): Path<String>,
+) -> Result<(StatusCode, Json<Deployment>), ApiError> {
+    let id = parse_id(&preview_id)?;
+    let db = state
+        .db
+        .clone()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+    let mut repo = db.previews();
+    let preview = repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound(format!("preview not found: {id}")))?;
+
+    let owner_id = get_project_user_id(&state, preview.project_id).await?;
+    let access = ProjectAccess::new(&auth_ctx, owner_id);
+    if !access.can_mutate() {
+        return Err(ApiError::Forbidden("operation on preview denied".into()));
+    }
+
+    if preview.status == crate::previews::PreviewStatus::Closed {
+        return Err(ApiError::BadRequest(
+            "cannot promote a closed preview".into(),
+        ));
+    }
+
+    let preview_service =
+        crate::preview_events::PreviewService::new(db.clone(), state.queue.clone());
+    let deployment = preview_service
+        .promote_to_production(id)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("closed") {
+                ApiError::BadRequest(msg)
+            } else {
+                ApiError::Internal(msg)
+            }
+        })?;
+
+    let audit = AuditService::new(Some(db));
+    let _ = audit
+        .record(
+            auth_ctx.user_id,
+            "preview.promote",
+            "preview",
+            id,
+            serde_json::json!({
+                "project_id": preview.project_id,
+                "deployment_id": deployment.id,
+                "commit_sha": deployment.commit_sha
+            }),
+        )
+        .await;
+
+    Ok((StatusCode::ACCEPTED, Json(deployment)))
+}
+
+async fn stop_preview(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(preview_id): Path<String>,
+) -> Result<Json<crate::previews::Preview>, ApiError> {
+    let id = parse_id(&preview_id)?;
+    let db = state
+        .db
+        .clone()
+        .ok_or_else(|| ApiError::Internal("database not configured".into()))?;
+    let mut repo = db.previews();
+    let preview = repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound(format!("preview not found: {id}")))?;
+
+    let owner_id = get_project_user_id(&state, preview.project_id).await?;
+    let access = ProjectAccess::new(&auth_ctx, owner_id);
+    if !access.can_mutate() {
+        return Err(ApiError::Forbidden("operation on preview denied".into()));
+    }
+
+    let preview_service =
+        crate::preview_events::PreviewService::new(db.clone(), state.queue.clone());
+    preview_service
+        .teardown_preview(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let updated = repo
+        .find_by_id(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .unwrap_or(preview);
+
+    let audit = AuditService::new(Some(db));
+    let _ = audit
+        .record(
+            auth_ctx.user_id,
+            "preview.stop",
+            "preview",
+            id,
+            serde_json::json!({
+                "project_id": updated.project_id,
+                "status": updated.status.to_string()
+            }),
+        )
+        .await;
+
+    Ok(Json(updated))
+}
+
 pub fn router(service: Arc<dyn PlatformService>) -> Router {
     router_with_auth(service, None, None)
 }
@@ -1163,6 +1342,13 @@ pub fn router_with_queue(
             "/v1/projects/:project_id/source/events",
             get(list_project_source_events),
         )
+        .route(
+            "/v1/projects/:project_id/previews",
+            get(list_project_previews),
+        )
+        .route("/v1/previews/:preview_id", get(get_preview))
+        .route("/v1/previews/:preview_id/promote", post(promote_preview))
+        .route("/v1/previews/:preview_id/stop", post(stop_preview))
         .route(
             "/v1/webhooks/:provider/:project_id",
             post(crate::webhooks::handle_webhook),
