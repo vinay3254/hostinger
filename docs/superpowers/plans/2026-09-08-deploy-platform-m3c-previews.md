@@ -36,10 +36,10 @@
 
 ### Task 1: Define preview records and safe hostnames
 
-- [ ] **Step 1: Write failing tests** for PR identity uniqueness, branch names with unsafe characters, maximum label length, unicode normalization, and deterministic hostname output.
-- [ ] **Step 2: Implement `preview_hostname(project_slug, pr_number) -> Result<String>`** with lowercase DNS labels, bounded length, and a hash suffix when truncation would collide.
-- [ ] **Step 3: Add preview schema** with project/provider/PR unique key, deployment ID, hostname, status, closed timestamp, and cleanup attempt.
-- [ ] **Step 4: Run tests and commit `feat: add preview identity and hostnames`**.
+- [x] **Step 1: Write failing tests** for PR identity uniqueness, branch names with unsafe characters, maximum label length, unicode normalization, and deterministic hostname output.
+- [x] **Step 2: Implement `preview_hostname(project_slug, pr_number) -> Result<String>`** with lowercase DNS labels, bounded length, and a hash suffix when truncation would collide.
+- [x] **Step 3: Add preview schema** with project/provider/PR unique key, deployment ID, hostname, status, closed timestamp, and cleanup attempt.
+- [x] **Step 4: Run tests and commit `feat: add preview identity and hostnames`**.
 
 ### Task 2: Consume pull-request events idempotently
 
