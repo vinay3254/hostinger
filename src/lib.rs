@@ -14,6 +14,7 @@ pub mod hostname;
 pub mod logs;
 pub mod metrics;
 pub mod model;
+pub mod node_registry;
 pub mod preview_events;
 pub mod previews;
 pub mod providers;
