@@ -47,6 +47,63 @@ export interface Deployment {
   build_duration_ms?: number | null;
   cached_duration_ms?: number | null;
   artifact_size_bytes?: number | null;
+  cause?: string | null;
+  rollback_from_deployment_id?: string | null;
+}
+
+export type ReleaseStatus =
+  | 'starting'
+  | 'health_checking'
+  | 'ready'
+  | 'active'
+  | 'draining'
+  | 'stopped'
+  | 'failed';
+
+export interface Release {
+  id: string;
+  deployment_id: string;
+  project_id: string;
+  environment: string;
+  status: ReleaseStatus;
+  version: number;
+  container_id?: string | null;
+  port?: number | null;
+  url?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReleaseTransitionRecord {
+  id: string;
+  release_id: string;
+  from_status: ReleaseStatus;
+  to_status: ReleaseStatus;
+  reason?: string | null;
+  created_at: string;
+}
+
+export interface RollbackTarget {
+  deployment_id: string;
+  release_id: string;
+  project_id: string;
+  environment: string;
+  framework: string;
+  commit_sha?: string | null;
+  image_path?: string | null;
+  container_id?: string | null;
+  port?: number | null;
+  url?: string | null;
+  created_at: string;
+}
+
+export interface RollbackResult {
+  new_deployment_id: string;
+  target: RollbackTarget;
+  active_release: Release;
+  previous_release?: Release | null;
+  drain_result?: string | null;
+  audit_event_id: string;
 }
 
 export interface ApiTokenSummary {
@@ -361,6 +418,18 @@ export const api = {
   clearProjectCache: (projectId: string) =>
     request<{ success: boolean; message: string }>(`/v1/projects/${projectId}/cache/clear`, {
       method: 'POST',
+    }),
+
+  listDeploymentReleases: (deploymentId: string) =>
+    request<Release[]>(`/v1/deployments/${deploymentId}/releases`),
+
+  listReleaseEvents: (releaseId: string) =>
+    request<ReleaseTransitionRecord[]>(`/v1/releases/${releaseId}/events`),
+
+  rollbackDeployment: (deploymentId: string, options?: { drain_timeout_secs?: number }) =>
+    request<RollbackResult>(`/v1/deployments/${deploymentId}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify(options ?? {}),
     }),
 
   downloadDeploymentLogsUrl: (deploymentId: string) =>
