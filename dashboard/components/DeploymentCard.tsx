@@ -47,6 +47,32 @@ export const DeploymentCard: React.FC<DeploymentCardProps> = ({ deployment, proj
         <StatusBadge status={deployment.status} />
       </div>
 
+      {(deployment.commit_sha || deployment.attempt != null || deployment.worker_id || deployment.queue_wait_ms != null) && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '12px',
+            fontSize: '12px',
+            color: '#4b5563',
+            fontFamily: 'monospace',
+          }}
+        >
+          {deployment.commit_sha && (
+            <span>SHA: {deployment.commit_sha.substring(0, 7)}</span>
+          )}
+          {deployment.attempt != null && (
+            <span>Attempt {deployment.attempt}</span>
+          )}
+          {deployment.worker_id && (
+            <span>Worker: {deployment.worker_id}</span>
+          )}
+          {deployment.queue_wait_ms != null && (
+            <span>Queue wait: {deployment.queue_wait_ms}ms</span>
+          )}
+        </div>
+      )}
+
       <div
         style={{
           display: 'flex',
