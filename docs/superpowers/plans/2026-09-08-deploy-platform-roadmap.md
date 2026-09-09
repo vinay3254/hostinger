@@ -88,17 +88,18 @@ M7b reuses the worker and runtime interfaces from M3b/M5.
 
 ## Plan Inventory
 
-| Plan | File | Deliverable | Depends on |
-| --- | --- | --- | --- |
-| M2 | `2026-09-08-deploy-platform-m2-dashboard-auth.md` | Authenticated dashboard and control-plane persistence | M1 |
-| M3a | `2026-09-08-deploy-platform-m3a-git-webhooks.md` | Git provider connections and verified webhook ingestion | M2 |
-| M3b | `2026-09-08-deploy-platform-m3b-queue-workers.md` | Durable build queue and isolated worker | M2, M3a source contracts |
-| M3c | `2026-09-08-deploy-platform-m3c-previews.md` | Pull-request preview lifecycle and unique URLs | M3a, M3b |
-| M4 | `2026-09-08-deploy-platform-m4-cache-observability.md` | Build cache, durable logs, and metrics API | M3b |
-| M5 | `2026-09-08-deploy-platform-m5-zero-downtime-rollback.md` | Health-gated releases, traffic swaps, rollback | M3b, M4 runtime events |
-| M6 | `2026-09-08-deploy-platform-m6-multinode.md` | Node agent, scheduler, capacity-aware placement | M5 |
-| M7a | `2026-09-08-deploy-platform-m7a-router-domains-tls.md` | Edge routing, custom domains, ACME TLS | M6 |
-| M7b | `2026-09-08-deploy-platform-m7b-ssr-autoscaling.md` | SSR process contract and autoscaling | M3b, M5, M6 |
+| Plan | File | Deliverable | Status | Depends on |
+| --- | --- | --- | --- | --- |
+| M1 | `2026-09-08-deploy-platform-m1.md` | Single-node static deployment core | Complete | None |
+| M2 | `2026-09-08-deploy-platform-m2-dashboard-auth.md` | Authenticated dashboard and control-plane persistence | Complete | M1 |
+| M3a | `2026-09-08-deploy-platform-m3a-git-webhooks.md` | Git provider connections and verified webhook ingestion | Complete | M2 |
+| M3b | `2026-09-08-deploy-platform-m3b-queue-workers.md` | Durable build queue and isolated worker | Complete | M2, M3a source contracts |
+| M3c | `2026-09-08-deploy-platform-m3c-previews.md` | Pull-request preview lifecycle and unique URLs | Complete | M3a, M3b |
+| M4 | `2026-09-08-deploy-platform-m4-cache-observability.md` | Build cache, durable logs, and metrics API | Complete | M3b |
+| M5 | `2026-09-08-deploy-platform-m5-zero-downtime-rollback.md` | Health-gated releases, traffic swaps, rollback | Complete | M3b, M4 runtime events |
+| M6 | `2026-09-08-deploy-platform-m6-multinode.md` | Node agent, scheduler, capacity-aware placement | In Progress | M5 |
+| M7a | `2026-09-08-deploy-platform-m7a-router-domains-tls.md` | Edge routing, custom domains, ACME TLS | Planned | M6 |
+| M7b | `2026-09-08-deploy-platform-m7b-ssr-autoscaling.md` | SSR process contract and autoscaling | Planned | M3b, M5, M6 |
 
 ## Cross-Cutting Definition of Done
 
