@@ -420,10 +420,7 @@ async fn get_deployment(
     Ok(Json(deployment))
 }
 
-async fn resolve_deployment_user_id(
-    state: &ApiState,
-    id: Uuid,
-) -> Result<Option<Uuid>, ApiError> {
+async fn resolve_deployment_user_id(state: &ApiState, id: Uuid) -> Result<Option<Uuid>, ApiError> {
     if let Some(db) = &state.db {
         let dep_row = sqlx::query("SELECT project_id FROM deployments WHERE id = $1")
             .bind(id)
@@ -1519,6 +1516,81 @@ async fn clear_project_cache(
     })))
 }
 
+async fn get_project_metrics(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(project_id): Path<String>,
+    Query(query): Query<crate::metrics::MetricsQuery>,
+) -> Result<Json<crate::metrics::MetricsResponse>, ApiError> {
+    let id = parse_id(&project_id)?;
+    let user_id = if let Some(db) = &state.db {
+        let mut repo = db.projects();
+        let proj = repo
+            .get_project(id)
+            .await
+            .map_err(|e| ApiError::NotFound(e.to_string()))?;
+        Some(proj.user_id)
+    } else {
+        let project = state.service.project(id).map_err(map_service_err)?;
+        project.user_id
+    };
+
+    let access = ProjectAccess::new(&auth_ctx, user_id);
+    if !access.can_read() {
+        return Err(ApiError::Forbidden(
+            "access to project metrics denied".into(),
+        ));
+    }
+
+    if let Some(db) = &state.db {
+        let mut repo = db.metrics();
+        let resp = repo
+            .query_metrics(id, &query)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok(Json(resp))
+    } else {
+        let now = time::OffsetDateTime::now_utc();
+        let range_str = query.range.as_deref().unwrap_or("1h");
+        let dur = crate::metrics::parse_range_duration(range_str);
+        let res_str = query
+            .resolution
+            .as_deref()
+            .unwrap_or_else(|| crate::metrics::default_resolution_for_range(range_str));
+        let resolution_secs = crate::metrics::parse_resolution_secs(res_str);
+        let start = query.start.unwrap_or(now - dur);
+        let end = query.end.unwrap_or(now);
+        let metric_names: Vec<&str> = if let Some(ref m) = query.metric {
+            vec![m.as_str()]
+        } else {
+            crate::metrics::ALL_METRICS.to_vec()
+        };
+        let series = metric_names
+            .into_iter()
+            .map(|m| {
+                crate::metrics::aggregate_samples_into_series(
+                    m,
+                    query.environment.as_deref(),
+                    &[],
+                    start,
+                    end,
+                    resolution_secs,
+                    now,
+                )
+            })
+            .collect();
+        Ok(Json(crate::metrics::MetricsResponse {
+            project_id: id,
+            range: range_str.to_string(),
+            resolution: res_str.to_string(),
+            start,
+            end,
+            series,
+            last_updated: now,
+        }))
+    }
+}
+
 pub fn router_with_providers(
     service: Arc<dyn PlatformService>,
     auth: Option<AuthService>,
@@ -1607,6 +1679,7 @@ pub fn router_with_queue(
             "/v1/projects/:project_id/cache/clear",
             post(clear_project_cache),
         )
+        .route("/v1/projects/:project_id/metrics", get(get_project_metrics))
         .route("/v1/previews/:preview_id", get(get_preview))
         .route("/v1/previews/:preview_id/promote", post(promote_preview))
         .route("/v1/previews/:preview_id/stop", post(stop_preview))
