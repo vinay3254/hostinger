@@ -417,3 +417,236 @@ async fn mutations_create_audit_events() {
     assert!(actions.iter().any(|a| a == "deployment.create"));
     assert!(actions.iter().any(|a| a == "deployment.stop"));
 }
+
+async fn setup_app() -> (axum::Router, Database, StateStore, tempfile::TempDir) {
+    let db = setup_test_db().await;
+    let auth = AuthService::new(db.clone());
+    let (service, _source, _base_img) = test_service();
+    let app = router_with_auth(service, Some(auth), Some(db.clone()));
+    let temp = tempdir().unwrap();
+    let store = StateStore::at(temp.path().to_path_buf());
+    (app, db, store, temp)
+}
+
+async fn create_test_user(db: &Database, email: &str) -> deploy_platform::repository::UserRecord {
+    let auth = AuthService::new(db.clone());
+    auth.register(email, "Password123!", "Test User")
+        .await
+        .unwrap()
+}
+
+async fn create_test_session(db: &Database, user_id: Uuid) -> deploy_platform::auth::SessionInfo {
+    let auth = AuthService::new(db.clone());
+    auth.create_session(user_id, time::Duration::days(1))
+        .await
+        .unwrap()
+}
+
+async fn create_test_project(db: &Database, user_id: Uuid, name: &str) -> Uuid {
+    let mut repo = db.projects();
+    let project = repo
+        .create_project(deploy_platform::repository::CreateProjectRecord {
+            id: Uuid::new_v4(),
+            user_id,
+            name: name.to_string(),
+            source_dir: PathBuf::from("/tmp"),
+            base_image: PathBuf::from("/tmp"),
+            server_command: vec!["echo".into()],
+            created_at: time::OffsetDateTime::now_utc(),
+        })
+        .await
+        .unwrap();
+    project.id
+}
+
+#[tokio::test]
+async fn preview_api_endpoints_and_permissions() {
+    let (app, db, _store, _temp) = setup_app().await;
+
+    // Register User A and User B
+    let user_a = create_test_user(
+        &db,
+        &format!("user-a-{}-pr@example.com", Uuid::new_v4().simple()),
+    )
+    .await;
+    let session_a = create_test_session(&db, user_a.id).await;
+
+    let user_b = create_test_user(
+        &db,
+        &format!("user-b-{}-pr@example.com", Uuid::new_v4().simple()),
+    )
+    .await;
+    let session_b = create_test_session(&db, user_b.id).await;
+
+    let proj_a_id = create_test_project(
+        &db,
+        user_a.id,
+        &format!("project-preview-{}", Uuid::new_v4().simple()),
+    )
+    .await;
+
+    // 1. Unauthenticated list previews -> 401
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/projects/{proj_a_id}/previews"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. User B (unauthorized) access to User A's project previews -> 403
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/projects/{proj_a_id}/previews"))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_b.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 3. User A lists empty previews -> 200 OK
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/projects/{proj_a_id}/previews"))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let previews: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(previews.len(), 0);
+
+    // 4. Create a preview in DB for Project A
+    let mut repo = deploy_platform::previews::PreviewRepository::new(db.pool().into());
+    let input = deploy_platform::previews::UpsertPreviewInput {
+        project_id: proj_a_id,
+        provider: "github".to_string(),
+        pr_number: 77,
+        head_sha: "rc-77-sha".to_string(),
+        base_branch: "main".to_string(),
+        head_branch: "feature/preview".to_string(),
+        deployment_id: None,
+        hostname: "project-preview-a-pr-77.preview.local".to_string(),
+        status: deploy_platform::previews::PreviewStatus::Ready,
+    };
+    let preview = repo.upsert(&input).await.unwrap();
+
+    // 5. User A lists previews -> 200 OK, finds preview
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/projects/{proj_a_id}/previews"))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let previews: Vec<serde_json::Value> = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(previews.len(), 1);
+    assert_eq!(previews[0]["pr_number"], 77);
+
+    // 6. User A gets preview detail -> 200 OK
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/previews/{}", preview.id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let p_detail: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(p_detail["id"], preview.id.to_string());
+
+    // 7. User B gets preview detail -> 403 Forbidden
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/previews/{}", preview.id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_b.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 8. User A promotes preview to production -> 202 Accepted
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/previews/{}/promote", preview.id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let prod_dep: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(prod_dep["commit_sha"], "rc-77-sha");
+
+    // 9. User A stops preview -> 200 OK
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/previews/{}/stop", preview.id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let stopped: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(stopped["status"], "closed");
+
+    // 10. Promoting a closed preview returns 400 Bad Request
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/previews/{}/promote", preview.id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
