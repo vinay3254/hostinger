@@ -423,3 +423,259 @@ async fn test_api_deploy_enqueues_and_returns_202() {
     let status: String = dep_row.get("status");
     assert_eq!(status, "running");
 }
+
+struct CountingBuildExecutor {
+    inner: MinidockBuildExecutor,
+    count: AtomicU32,
+}
+
+impl CountingBuildExecutor {
+    fn new(artifacts_dir: &Path) -> Self {
+        Self {
+            inner: MinidockBuildExecutor::new(artifacts_dir),
+            count: AtomicU32::new(0),
+        }
+    }
+}
+
+impl BuildExecutor for CountingBuildExecutor {
+    fn execute(
+        &self,
+        plan: &BuildPlan,
+        source_dir: &Path,
+        sink: &mut dyn LogSink,
+    ) -> deploy_platform::Result<BuildResult> {
+        self.count.fetch_add(1, Ordering::SeqCst);
+        self.inner.execute(plan, source_dir, sink)
+    }
+}
+
+#[tokio::test]
+async fn test_worker_cache_hit_skips_build_execution_and_invalidation() {
+    let prefix = format!("worker_cache_{}", Uuid::new_v4().simple());
+    let (db, queue) = get_test_db_and_queue(&prefix).await;
+
+    let src_dir = tempdir().unwrap();
+    fs::write(src_dir.path().join("index.html"), "<h1>Cache Test</h1>").unwrap();
+
+    let (project_id, deployment_id_1) =
+        create_test_project_and_deployment(&db, src_dir.path()).await;
+
+    queue
+        .enqueue_job(deployment_id_1, project_id, BuildPriority::Production)
+        .await
+        .unwrap();
+
+    let artifacts_dir = tempdir().unwrap();
+    let artifact_store = ArtifactStore::new(artifacts_dir.path());
+    let workspace_dir = tempdir().unwrap();
+    let counting_executor = Arc::new(CountingBuildExecutor::new(artifacts_dir.path()));
+
+    let worker = BuildWorker::new(
+        "worker-cache-1",
+        db.pool().clone(),
+        queue.clone(),
+        counting_executor.clone(),
+        artifact_store.clone(),
+        workspace_dir.path().to_path_buf(),
+    );
+
+    // Run 1: Cache miss -> executes build (count = 1)
+    let outcome1 = worker.run_once().await.unwrap();
+    assert!(matches!(outcome1, BuildWorkerOutcome::Completed(_)));
+    assert_eq!(counting_executor.count.load(Ordering::SeqCst), 1);
+
+    // Verify build.cache.checked event was emitted with hit: false
+    let cache_event_1 = sqlx::query(
+        "SELECT payload FROM build_events WHERE deployment_id = $1 AND event_type = 'build.cache.checked'",
+    )
+    .bind(deployment_id_1)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let payload_1: serde_json::Value = cache_event_1.get("payload");
+    assert_eq!(payload_1["hit"], false);
+
+    // Deployment 2 with identical project & source
+    let deployment_id_2 = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO deployments (id, project_id, framework, status, created_at)
+         VALUES ($1, $2, 'static', 'queued', NOW())",
+    )
+    .bind(deployment_id_2)
+    .bind(project_id)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    queue
+        .enqueue_job(deployment_id_2, project_id, BuildPriority::Production)
+        .await
+        .unwrap();
+
+    // Run 2: Cache hit -> should skip execute (count remains 1!)
+    let outcome2 = worker.run_once().await.unwrap();
+    assert!(matches!(outcome2, BuildWorkerOutcome::Completed(_)));
+    assert_eq!(counting_executor.count.load(Ordering::SeqCst), 1);
+
+    // Verify build.cache.checked event was emitted with hit: true
+    let cache_event_2 = sqlx::query(
+        "SELECT payload FROM build_events WHERE deployment_id = $1 AND event_type = 'build.cache.checked'",
+    )
+    .bind(deployment_id_2)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let payload_2: serde_json::Value = cache_event_2.get("payload");
+    assert_eq!(payload_2["hit"], true);
+
+    // Verify deployment 2 is running and has image_path populated
+    let dep_2_row = sqlx::query("SELECT status, image_path FROM deployments WHERE id = $1")
+        .bind(deployment_id_2)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let status_2: String = dep_2_row.get("status");
+    let image_path_2: Option<String> = dep_2_row.get("image_path");
+    assert_eq!(status_2, "running");
+    assert!(image_path_2.is_some());
+
+    // Deployment 3: Force rebuild bypasses valid cache
+    let deployment_id_3 = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO deployments (id, project_id, framework, status, created_at)
+         VALUES ($1, $2, 'static', 'queued', NOW())",
+    )
+    .bind(deployment_id_3)
+    .bind(project_id)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    queue
+        .enqueue_job_with_force_rebuild(
+            deployment_id_3,
+            project_id,
+            BuildPriority::Production,
+            true,
+        )
+        .await
+        .unwrap();
+
+    let outcome3 = worker.run_once().await.unwrap();
+    assert!(matches!(outcome3, BuildWorkerOutcome::Completed(_)));
+    assert_eq!(counting_executor.count.load(Ordering::SeqCst), 2);
+
+    let cache_event_3 = sqlx::query(
+        "SELECT payload FROM build_events WHERE deployment_id = $1 AND event_type = 'build.cache.checked'",
+    )
+    .bind(deployment_id_3)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let payload_3: serde_json::Value = cache_event_3.get("payload");
+    assert_eq!(payload_3["hit"], false);
+    assert_eq!(payload_3["reason"], "force_rebuild");
+
+    // Invalidation: clear project cache
+    let mut cache_repo = deploy_platform::cache::BuildCacheRepository::new(db.pool().into());
+    cache_repo.invalidate_project(project_id).await.unwrap();
+
+    // Deployment 4 after cache invalidation
+    let deployment_id_4 = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO deployments (id, project_id, framework, status, created_at)
+         VALUES ($1, $2, 'static', 'queued', NOW())",
+    )
+    .bind(deployment_id_4)
+    .bind(project_id)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    queue
+        .enqueue_job(deployment_id_4, project_id, BuildPriority::Production)
+        .await
+        .unwrap();
+
+    // Run 4: Cache miss due to invalidation -> count increments to 3!
+    let outcome4 = worker.run_once().await.unwrap();
+    assert!(matches!(outcome4, BuildWorkerOutcome::Completed(_)));
+    assert_eq!(counting_executor.count.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn test_worker_failed_publish_preserves_build_success() {
+    let prefix = format!("worker_fail_pub_{}", Uuid::new_v4().simple());
+    let (db, queue) = get_test_db_and_queue(&prefix).await;
+
+    let src_dir = tempdir().unwrap();
+    fs::write(src_dir.path().join("index.html"), "<h1>Resilient</h1>").unwrap();
+
+    let (project_id, deployment_id) = create_test_project_and_deployment(&db, src_dir.path()).await;
+
+    queue
+        .enqueue_job(deployment_id, project_id, BuildPriority::Production)
+        .await
+        .unwrap();
+
+    let artifacts_dir = tempdir().unwrap();
+    let artifact_store = ArtifactStore::new(artifacts_dir.path());
+    let workspace_dir = tempdir().unwrap();
+    let counting_executor = Arc::new(CountingBuildExecutor::new(artifacts_dir.path()));
+
+    let worker = BuildWorker::new(
+        "worker-fail-pub-1",
+        db.pool().clone(),
+        queue.clone(),
+        counting_executor.clone(),
+        artifact_store.clone(),
+        workspace_dir.path().to_path_buf(),
+    );
+
+    // Break cache insertion for this project only
+    sqlx::query(
+        r#"
+        CREATE OR REPLACE FUNCTION fail_cache_insert() RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'Simulated cache publish failure';
+        END;
+        $$ LANGUAGE plpgsql;
+        "#,
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    let trigger_sql = format!(
+        r#"
+        CREATE TRIGGER trigger_fail_cache_insert
+        BEFORE INSERT ON build_cache
+        FOR EACH ROW
+        WHEN (NEW.project_id = '{project_id}')
+        EXECUTE FUNCTION fail_cache_insert();
+        "#
+    );
+    sqlx::query(&trigger_sql).execute(db.pool()).await.unwrap();
+
+    // Execute worker: build succeeds even though cache publish throws exception!
+    let outcome = worker.run_once().await.unwrap();
+    assert!(matches!(outcome, BuildWorkerOutcome::Completed(_)));
+
+    // Verify deployment completed successfully and is running
+    let dep_row = sqlx::query("SELECT status, image_path FROM deployments WHERE id = $1")
+        .bind(deployment_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let status: String = dep_row.get("status");
+    assert_eq!(status, "running");
+
+    // Clean up trigger so other tests in same DB aren't affected
+    let _ = sqlx::query("DROP TRIGGER IF EXISTS trigger_fail_cache_insert ON build_cache")
+        .execute(db.pool())
+        .await;
+    let _ = sqlx::query("DROP FUNCTION IF EXISTS fail_cache_insert")
+        .execute(db.pool())
+        .await;
+}
