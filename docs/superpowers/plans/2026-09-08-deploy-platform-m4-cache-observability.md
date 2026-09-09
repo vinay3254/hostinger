@@ -46,11 +46,11 @@
 
 ### Task 2: Integrate cache lookup and publish into workers
 
-- [ ] **Step 1: Write failing worker tests** for cache hit skipping install/build, cache miss running the full plan, failed publish preserving build success, and invalidation.
-- [ ] **Step 2: Add cache lookup before build execution** and emit `build.cache.checked` with hit/miss reason but no secret values.
-- [ ] **Step 3: Publish successful immutable artifacts** only after checksum/manifest validation; update last-used asynchronously.
-- [ ] **Step 4: Add force-rebuild and project cache-clear operations** with audit events.
-- [ ] **Step 5: Run worker tests and commit `feat: integrate build cache into workers`**.
+- [x] **Step 1: Write failing worker tests** for cache hit skipping install/build, cache miss running the full plan, failed publish preserving build success, and invalidation.
+- [x] **Step 2: Add cache lookup before build execution** and emit `build.cache.checked` with hit/miss reason but no secret values.
+- [x] **Step 3: Publish successful immutable artifacts** only after checksum/manifest validation; update last-used asynchronously.
+- [x] **Step 4: Add force-rebuild and project cache-clear operations** with audit events.
+- [x] **Step 5: Run worker tests and commit `feat: integrate build cache into workers`**.
 
 ### Task 3: Persist and stream build/runtime logs
 
