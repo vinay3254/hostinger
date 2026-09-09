@@ -749,3 +749,131 @@ async fn project_cache_clear_api_test() {
     let events = audits.list_by_user(user_a.id).await.unwrap();
     assert!(events.iter().any(|e| e.action == "project.cache.clear"));
 }
+
+#[tokio::test]
+async fn deployment_logs_endpoints_and_permissions() {
+    let (app, db, _store, _temp) = setup_app().await;
+
+    let user_a = create_test_user(
+        &db,
+        &format!("user-a-{}-logs@example.com", Uuid::new_v4().simple()),
+    )
+    .await;
+    let session_a = create_test_session(&db, user_a.id).await;
+
+    let user_b = create_test_user(
+        &db,
+        &format!("user-b-{}-logs@example.com", Uuid::new_v4().simple()),
+    )
+    .await;
+    let session_b = create_test_session(&db, user_b.id).await;
+
+    let project_id = create_test_project(
+        &db,
+        user_a.id,
+        &format!("project-logs-{}", Uuid::new_v4().simple()),
+    )
+    .await;
+
+    let deployment_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO deployments (id, project_id, framework, status, created_at)
+         VALUES ($1, $2, 'static', 'running', NOW())",
+    )
+    .bind(deployment_id)
+    .bind(project_id)
+    .execute(db.pool())
+    .await
+    .unwrap();
+
+    // Append some log lines
+    let mut logs_repo = db.logs();
+    logs_repo
+        .append(
+            deployment_id,
+            project_id,
+            1,
+            "stdout",
+            "Starting application...",
+            time::OffsetDateTime::now_utc(),
+        )
+        .await
+        .unwrap();
+    logs_repo
+        .append(
+            deployment_id,
+            project_id,
+            2,
+            "stderr",
+            "Warning: check config",
+            time::OffsetDateTime::now_utc(),
+        )
+        .await
+        .unwrap();
+
+    // 1. Unauthenticated -> 401
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/deployments/{}/logs", deployment_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. User B (not owner) -> 403
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/deployments/{}/logs", deployment_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_b.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 3. User A (owner) -> 200 OK
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/deployments/{}/logs", deployment_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let logs_resp: deploy_platform::logs::LogsResponse = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(logs_resp.lines.len(), 2);
+    assert_eq!(logs_resp.lines[0].message, "Starting application...");
+    assert_eq!(logs_resp.lines[1].stream, "stderr");
+
+    // 4. Download logs -> 200 OK text/plain
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/v1/deployments/{}/logs/download", deployment_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", session_a.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let content_type = res.headers().get("content-type").unwrap().to_str().unwrap();
+    assert!(content_type.contains("text/plain"));
+    let raw_logs = res.into_body().collect().await.unwrap().to_bytes();
+    let log_text = String::from_utf8(raw_logs.to_vec()).unwrap();
+    assert!(log_text.contains("Starting application..."));
+    assert!(log_text.contains("Warning: check config"));
+}
