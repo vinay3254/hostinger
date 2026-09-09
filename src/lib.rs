@@ -25,6 +25,7 @@ pub mod releases;
 pub mod repository;
 pub mod rollback;
 pub mod runtime;
+pub mod scheduler;
 pub mod service;
 pub mod source_checkout;
 pub mod source_events;
