@@ -33,6 +33,16 @@ impl<'a> DbExecutor<'a> {
         }
     }
 
+    pub async fn fetch_one<'q>(
+        &mut self,
+        query: Query<'q, Postgres, PgArguments>,
+    ) -> Result<PgRow, sqlx::Error> {
+        match self {
+            DbExecutor::Pool(pool) => query.fetch_one(*pool).await,
+            DbExecutor::Tx(tx) => query.fetch_one(&mut ***tx).await,
+        }
+    }
+
     pub async fn fetch_all<'q>(
         &mut self,
         query: Query<'q, Postgres, PgArguments>,
@@ -41,6 +51,12 @@ impl<'a> DbExecutor<'a> {
             DbExecutor::Pool(pool) => query.fetch_all(*pool).await,
             DbExecutor::Tx(tx) => query.fetch_all(&mut ***tx).await,
         }
+    }
+}
+
+impl<'a> From<&'a sqlx::PgPool> for DbExecutor<'a> {
+    fn from(pool: &'a sqlx::PgPool) -> Self {
+        DbExecutor::Pool(pool)
     }
 }
 
