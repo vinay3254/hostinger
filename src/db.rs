@@ -81,6 +81,10 @@ impl Database {
     pub fn cache(&self) -> crate::cache::BuildCacheRepository<'_> {
         crate::cache::BuildCacheRepository::new(DbExecutor::Pool(&self.pool))
     }
+
+    pub fn logs(&self) -> crate::logs::LogRepository<'_> {
+        crate::logs::LogRepository::new(DbExecutor::Pool(&self.pool))
+    }
 }
 
 pub struct DbTransaction {
@@ -118,6 +122,10 @@ impl DbTransaction {
 
     pub fn cache(&mut self) -> crate::cache::BuildCacheRepository<'_> {
         crate::cache::BuildCacheRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub fn logs(&mut self) -> crate::logs::LogRepository<'_> {
+        crate::logs::LogRepository::new(DbExecutor::Tx(&mut self.tx))
     }
 
     pub async fn commit(self) -> Result<()> {
