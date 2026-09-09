@@ -327,3 +327,128 @@ async fn pull_request_event_lifecycle_and_idempotency() {
     assert_eq!(preview.status, PreviewStatus::Building);
     assert_eq!(preview.head_sha, "commit-sha-3");
 }
+
+#[tokio::test]
+async fn preview_runtime_lifecycle_and_promotion() {
+    let db = setup_test_db().await;
+    let (_user_id, project_id) = create_test_user_and_project(&db).await;
+
+    let service = PreviewService::new(db.clone(), None);
+    let mut repo = PreviewRepository::new(db.pool().into());
+
+    // 1. Initial PR Event creates preview
+    let pr_ref = PullRequestRef {
+        number: 55,
+        head_sha: "rc-sha-1".to_string(),
+        base_branch: "main".to_string(),
+        action: PullRequestAction::Opened,
+    };
+    let event1 = SourceEventRecord {
+        id: Uuid::new_v4(),
+        project_id,
+        provider: Provider::GitHub,
+        delivery_id: "deliv-55-1".to_string(),
+        kind: SourceEventKind::PullRequestOpened,
+        commit_sha: "rc-sha-1".to_string(),
+        branch: Some("feature/release".to_string()),
+        pull_request: Some(pr_ref),
+        idempotency_key: "github:deliv-55-1:rc-sha-1".to_string(),
+        created_at: OffsetDateTime::now_utc(),
+    };
+
+    let outcome = service.apply_event(&event1).await.unwrap().unwrap();
+    let (preview_id, dep1) = match outcome {
+        PreviewOutcome::Created {
+            preview_id,
+            deployment_id,
+        } => (preview_id, deployment_id),
+        _ => panic!("expected Created"),
+    };
+
+    // 2. Preview build success allocates route and updates preview to Ready
+    let preview_url = "http://app-pr-55.preview.local:4000";
+    service
+        .record_build_success(preview_id, dep1, 4000, preview_url, "/artifacts/dep1.tar")
+        .await
+        .expect("recorded build success");
+
+    let p = repo.find_by_id(preview_id).await.unwrap().unwrap();
+    assert_eq!(p.status, PreviewStatus::Ready);
+    assert_eq!(p.deployment_id, Some(dep1));
+
+    let d1: (String, Option<i32>, Option<String>) =
+        sqlx::query_as("SELECT status, port, url FROM deployments WHERE id = $1")
+            .bind(dep1)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(d1.0, "running");
+    assert_eq!(d1.1, Some(4000));
+    assert_eq!(d1.2.as_deref(), Some(preview_url));
+
+    // 3. New commit build fails -> Failed build preserves prior healthy preview!
+    let dep2 = Uuid::new_v4();
+    sqlx::query("INSERT INTO deployments (id, project_id, framework, status, created_at, commit_sha) VALUES ($1, $2, 'static', 'building', NOW(), 'rc-sha-2')")
+        .bind(dep2)
+        .bind(project_id)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+    service
+        .record_build_failure(preview_id, dep2, "compilation failed on step 3")
+        .await
+        .expect("recorded build failure");
+
+    // Failed deployment is marked failed
+    let d2_status: String = sqlx::query_scalar("SELECT status FROM deployments WHERE id = $1")
+        .bind(dep2)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(d2_status, "failed");
+
+    // Prior preview MUST remain Ready with prior deployment dep1 preserved
+    let p_preserved = repo.find_by_id(preview_id).await.unwrap().unwrap();
+    assert_eq!(p_preserved.status, PreviewStatus::Ready);
+    assert_eq!(p_preserved.deployment_id, Some(dep1));
+
+    // 4. Promote to production creates a new production deployment from exact preview commit
+    let prod_dep = service
+        .promote_to_production(preview_id)
+        .await
+        .expect("promoted preview to production");
+
+    assert_ne!(
+        prod_dep.id, dep1,
+        "promoted deployment must be a new deployment record"
+    );
+    assert_eq!(prod_dep.project_id, project_id);
+    assert_eq!(prod_dep.commit_sha.as_deref(), Some("rc-sha-1"));
+
+    // Preview remains unchanged and ready
+    let p_after_promote = repo.find_by_id(preview_id).await.unwrap().unwrap();
+    assert_eq!(p_after_promote.status, PreviewStatus::Ready);
+
+    // 5. Idempotent Teardown
+    service
+        .teardown_preview(preview_id)
+        .await
+        .expect("teardown succeeds");
+    let p_closed = repo.find_by_id(preview_id).await.unwrap().unwrap();
+    assert_eq!(p_closed.status, PreviewStatus::Closed);
+    assert!(p_closed.closed_at.is_some());
+
+    let d1_after_stop: String = sqlx::query_scalar("SELECT status FROM deployments WHERE id = $1")
+        .bind(dep1)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(d1_after_stop, "stopped");
+
+    // Second teardown call is idempotent
+    service
+        .teardown_preview(preview_id)
+        .await
+        .expect("idempotent teardown succeeds");
+}
