@@ -9,6 +9,8 @@ import { AppShell } from '../../../../../components/AppShell';
 import { StatusBadge } from '../../../../../components/StatusBadge';
 import { LogViewer } from '../../../../../components/LogViewer';
 import { EmptyState } from '../../../../../components/EmptyState';
+import { ReleaseProgress } from '../../../../../components/ReleaseProgress';
+import { RollbackDialog } from '../../../../../components/RollbackDialog';
 
 export default function DeploymentDetailPage() {
   const params = useParams();
@@ -19,6 +21,7 @@ export default function DeploymentDetailPage() {
   const [stopping, setStopping] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [isRollbackOpen, setIsRollbackOpen] = useState(false);
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -257,6 +260,23 @@ export default function DeploymentDetailPage() {
           )}
 
           <button
+            onClick={() => setIsRollbackOpen(true)}
+            data-testid="rollback-button"
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              border: '1px solid #e11d48',
+              backgroundColor: '#fff1f2',
+              color: '#e11d48',
+              fontSize: '13px',
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+          >
+            Rollback
+          </button>
+
+          <button
             onClick={handleRedeploy}
             style={{
               padding: '8px 16px',
@@ -383,6 +403,21 @@ export default function DeploymentDetailPage() {
             {deployment.container_id ? deployment.container_id.substring(0, 12) : 'None'}
           </span>
         </div>
+        <div>
+          <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Cause</span>
+          <span style={{ fontSize: '14px', fontWeight: 500, textTransform: 'capitalize' }}>
+            {deployment.cause === 'rollback' ? (
+              <span style={{ color: '#e11d48', fontWeight: 600 }}>Rollback</span>
+            ) : (
+              deployment.cause || 'Manual'
+            )}
+          </span>
+        </div>
+      </div>
+
+      {/* Release Pipeline Progress */}
+      <div style={{ marginBottom: '24px' }}>
+        <ReleaseProgress deploymentId={deploymentId} />
       </div>
 
       {deployment.error && (
@@ -440,6 +475,16 @@ export default function DeploymentDetailPage() {
           isReconnecting={isBuildingOrQueued && isLogsError}
         />
       </section>
+
+      {/* Rollback Dialog */}
+      <RollbackDialog
+        isOpen={isRollbackOpen}
+        onClose={() => setIsRollbackOpen(false)}
+        projectId={projectId}
+        deploymentId={deploymentId}
+        currentCommitSha={deployment.commit_sha}
+      />
     </AppShell>
   );
 }
+
