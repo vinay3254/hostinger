@@ -12,6 +12,10 @@ path = "src/main.rs"
 name = "build-worker"
 path = "src/bin/build-worker.rs"
 
+[[bin]]
+name = "platform-agent"
+path = "src/bin/platform-agent.rs"
+
 [dependencies]
 anyhow = "1.0"
 axum = "0.7"
