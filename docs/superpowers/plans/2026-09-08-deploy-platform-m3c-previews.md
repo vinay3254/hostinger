@@ -43,10 +43,10 @@
 
 ### Task 2: Consume pull-request events idempotently
 
-- [ ] **Step 1: Write failing tests** for opened, synchronized, reopened, closed, and merged events plus duplicate delivery.
-- [ ] **Step 2: Implement `PreviewService::apply_event`**: create/update preview, create a preview deployment for new SHA, enqueue rebuild for changed SHA, and request teardown for closed/merged state.
-- [ ] **Step 3: Add event ordering checks** so an older commit cannot replace a newer preview.
-- [ ] **Step 4: Run service tests and commit `feat: create previews from pull requests`**.
+- [x] **Step 1: Write failing tests** for opened, synchronized, reopened, closed, and merged events plus duplicate delivery.
+- [x] **Step 2: Implement `PreviewService::apply_event`**: create/update preview, create a preview deployment for new SHA, enqueue rebuild for changed SHA, and request teardown for closed/merged state.
+- [x] **Step 3: Add event ordering checks** so an older commit cannot replace a newer preview.
+- [x] **Step 4: Run service tests and commit `feat: create previews from pull requests`**.
 
 ### Task 3: Integrate preview build/runtime/release lifecycle
 
