@@ -63,11 +63,11 @@
 
 ### Task 4: Add metrics events and query API
 
-- [ ] **Step 1: Write failing tests** for counter/rate/latency aggregation, out-of-order samples, time-zone boundaries, and no-data windows.
-- [ ] **Step 2: Define metric names**: `build_duration_seconds`, `build_cache_hit_total`, `deployment_health_check_total`, `request_total`, `request_error_total`, `request_latency_ms`, `container_cpu_seconds`, and `container_memory_bytes`.
-- [ ] **Step 3: Implement metric ingestion and fixed-window rollups** with source timestamps and partial-data flags.
-- [ ] **Step 4: Add `GET /v1/projects/:id/metrics`** with metric, range, resolution, and environment filters.
-- [ ] **Step 5: Run metrics tests and commit `feat: add deployment metrics api`**.
+- [x] **Step 1: Write failing tests** for counter/rate/latency aggregation, out-of-order samples, time-zone boundaries, and no-data windows.
+- [x] **Step 2: Define metric names**: `build_duration_seconds`, `build_cache_hit_total`, `deployment_health_check_total`, `request_total`, `request_error_total`, `request_latency_ms`, `container_cpu_seconds`, and `container_memory_bytes`.
+- [x] **Step 3: Implement metric ingestion and fixed-window rollups** with source timestamps and partial-data flags.
+- [x] **Step 4: Add `GET /v1/projects/:id/metrics`** with metric, range, resolution, and environment filters.
+- [x] **Step 5: Run metrics tests and commit `feat: add deployment metrics api`**.
 
 ### Task 5: Add dashboard cache/log/metrics surfaces
 
