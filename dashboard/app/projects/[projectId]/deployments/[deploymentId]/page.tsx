@@ -17,6 +17,8 @@ export default function DeploymentDetailPage() {
   const projectId = params.projectId as string;
   const deploymentId = params.deploymentId as string;
   const [stopping, setStopping] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -30,18 +32,36 @@ export default function DeploymentDetailPage() {
     enabled: Boolean(deploymentId),
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (data && (data.status === 'building' || data.status === 'pending')) {
+      if (
+        data &&
+        (data.status === 'building' ||
+          data.status === 'pending' ||
+          data.status === 'queued' ||
+          data.status === 'retrying')
+      ) {
         return 1000;
       }
       return false;
     },
   });
 
-  const { data: logsData } = useQuery({
+  const isBuildingOrQueued = Boolean(
+    deployment &&
+      ['queued', 'pending', 'building', 'retrying'].includes(deployment.status)
+  );
+
+  const {
+    data: logsData,
+    isError: isLogsError,
+  } = useQuery({
     queryKey: ['logs', deploymentId],
     queryFn: () => api.getDeploymentLogs(deploymentId),
     enabled: Boolean(deploymentId),
-    refetchInterval: deployment?.status === 'running' ? 3000 : false,
+    refetchInterval: isBuildingOrQueued
+      ? 1000
+      : deployment?.status === 'running'
+      ? 3000
+      : false,
   });
 
   const stopMutation = useMutation({
@@ -50,6 +70,28 @@ export default function DeploymentDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['deployment', deploymentId] });
       queryClient.invalidateQueries({ queryKey: ['deployments', projectId] });
       queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () => api.cancelDeployment(deploymentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deployment', deploymentId] });
+      queryClient.invalidateQueries({ queryKey: ['deployments', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+    },
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: () => api.retryDeployment(deploymentId),
+    onSuccess: (newDep) => {
+      queryClient.invalidateQueries({ queryKey: ['deployments', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] });
+      if (newDep?.id && newDep.id !== deploymentId) {
+        router.push(`/projects/${projectId}/deployments/${newDep.id}`);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['deployment', deploymentId] });
+      }
     },
   });
 
@@ -68,6 +110,30 @@ export default function DeploymentDetailPage() {
       await stopMutation.mutateAsync();
     } finally {
       setStopping(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm('Are you sure you want to cancel this build?')
+    ) {
+      return;
+    }
+    setCancelling(true);
+    try {
+      await cancelMutation.mutateAsync();
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await retryMutation.mutateAsync();
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -131,6 +197,46 @@ export default function DeploymentDetailPage() {
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>
+          {(deployment.status === 'queued' ||
+            deployment.status === 'building' ||
+            deployment.status === 'retrying') && (
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '6px',
+                border: '1px solid #dc2626',
+                backgroundColor: '#ffffff',
+                color: '#dc2626',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: cancelling ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {cancelling ? 'Cancelling...' : 'Cancel Build'}
+            </button>
+          )}
+
+          {(deployment.status === 'failed' || deployment.status === 'cancelled') && (
+            <button
+              onClick={handleRetry}
+              disabled={retrying}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '6px',
+                border: '1px solid #2563eb',
+                backgroundColor: '#ffffff',
+                color: '#2563eb',
+                fontSize: '13px',
+                fontWeight: 500,
+                cursor: retrying ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {retrying ? 'Retrying...' : 'Retry Build'}
+            </button>
+          )}
+
           {deployment.status === 'running' && (
             <button
               onClick={handleStop}
@@ -187,6 +293,36 @@ export default function DeploymentDetailPage() {
           <span style={{ fontSize: '14px', fontWeight: 500, textTransform: 'capitalize' }}>{deployment.framework}</span>
         </div>
         <div>
+          <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Commit SHA</span>
+          <span style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'monospace' }}>
+            {deployment.commit_sha ? deployment.commit_sha.substring(0, 7) : 'None'}
+          </span>
+        </div>
+        <div>
+          <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Attempt</span>
+          <span style={{ fontSize: '14px', fontWeight: 500 }}>
+            {deployment.attempt ? `Attempt ${deployment.attempt}` : 'Attempt 1'}
+          </span>
+        </div>
+        <div>
+          <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Worker Node</span>
+          <span style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'monospace' }}>
+            {deployment.worker_id || 'None'}
+          </span>
+        </div>
+        <div>
+          <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Queue Wait</span>
+          <span style={{ fontSize: '14px', fontWeight: 500 }}>
+            {deployment.queue_wait_ms != null ? `${deployment.queue_wait_ms}ms` : '0ms'}
+          </span>
+        </div>
+        <div>
+          <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Cache Status</span>
+          <span style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'monospace' }}>
+            {deployment.cache_status || 'MISS'}
+          </span>
+        </div>
+        <div>
           <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Container Port</span>
           <span style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'monospace' }}>
             {deployment.port ? `:${deployment.port}` : 'None'}
@@ -217,9 +353,35 @@ export default function DeploymentDetailPage() {
             border: '1px solid #fecaca',
             color: '#991b1b',
             fontSize: '14px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '16px',
           }}
         >
-          <strong>Deployment Error:</strong> {deployment.error}
+          <div>
+            <strong>Deployment Error:</strong> {deployment.error}
+            <div style={{ marginTop: '4px', fontSize: '12px', color: '#7f1d1d' }}>
+              Inspect build logs below for detailed diagnostic messages or retry the build.
+            </div>
+          </div>
+          <button
+            onClick={handleRetry}
+            disabled={retrying}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #b91c1c',
+              backgroundColor: '#ffffff',
+              color: '#b91c1c',
+              fontSize: '12px',
+              fontWeight: 500,
+              cursor: retrying ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {retrying ? 'Retrying...' : 'Retry Build'}
+          </button>
         </div>
       )}
 
@@ -228,7 +390,11 @@ export default function DeploymentDetailPage() {
         <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '12px' }}>
           Deployment Logs
         </h2>
-        <LogViewer logs={logsData?.logs || ''} />
+        <LogViewer
+          logs={logsData?.logs || ''}
+          isStreaming={isBuildingOrQueued && !isLogsError}
+          isReconnecting={isBuildingOrQueued && isLogsError}
+        />
       </section>
     </AppShell>
   );
