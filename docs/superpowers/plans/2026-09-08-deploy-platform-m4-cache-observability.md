@@ -71,11 +71,11 @@
 
 ### Task 5: Add dashboard cache/log/metrics surfaces
 
-- [ ] **Step 1: Write failing dashboard tests** for cache hit/miss display, log reconnect, chart empty/partial state, table alternative, and time-range changes.
-- [ ] **Step 2: Update deployment detail** with cache key summary, duration comparison, and build artifact metadata.
-- [ ] **Step 3: Implement virtualized `LogViewer`** with search, pause/follow, download, reconnect, and secret-safe rendering.
-- [ ] **Step 4: Implement metrics cards/charts plus accessible data tables** from `FRONTEND.md`.
-- [ ] **Step 5: Run dashboard tests/build and commit `feat: add cache and observability dashboard`**.
+- [x] **Step 1: Write failing dashboard tests** for cache hit/miss display, log reconnect, chart empty/partial state, table alternative, and time-range changes.
+- [x] **Step 2: Update deployment detail** with cache key summary, duration comparison, and build artifact metadata.
+- [x] **Step 3: Implement virtualized `LogViewer`** with search, pause/follow, download, reconnect, and secret-safe rendering.
+- [x] **Step 4: Implement metrics cards/charts plus accessible data tables** from `FRONTEND.md`.
+- [x] **Step 5: Run dashboard tests/build and commit `feat: add cache and observability dashboard`**.
 
 ## M4 Acceptance Criteria
 
