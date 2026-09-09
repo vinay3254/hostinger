@@ -91,11 +91,11 @@ pub struct BuildResult { pub artifact_path: PathBuf, pub cache_key: String, pub 
 
 ### Task 5: Add dashboard queue/build states
 
-- [ ] **Step 1: Write failing dashboard tests** for queued, retrying, building, cancelled, and failed deployment states.
-- [ ] **Step 2: Add live build log stream consumption** with reconnect and last-sequence handling.
-- [ ] **Step 3: Show build attempt number, queue wait, worker, cache status placeholder, and actionable errors.**
-- [ ] **Step 4: Add cancel/retry controls** with mutation confirmation and disabled states.
-- [ ] **Step 5: Run dashboard tests/build and update `FRONTEND.md` if labels/routes changed.**
+- [x] **Step 1: Write failing dashboard tests** for queued, retrying, building, cancelled, and failed deployment states.
+- [x] **Step 2: Add live build log stream consumption** with reconnect and last-sequence handling.
+- [x] **Step 3: Show build attempt number, queue wait, worker, cache status placeholder, and actionable errors.**
+- [x] **Step 4: Add cancel/retry controls** with mutation confirmation and disabled states.
+- [x] **Step 5: Run dashboard tests/build and update `FRONTEND.md` if labels/routes changed.**
 
 ## M3b Acceptance Criteria
 
