@@ -46,11 +46,11 @@
 
 ### Task 2: Implement node registry and heartbeats
 
-- [ ] **Step 1: Write failing tests** for register, heartbeat update, stale heartbeat, drain, disable, capacity validation, and identity rotation.
-- [ ] **Step 2: Add node/heartbeat schema** with status, capacity, observed utilization, last heartbeat, drain flag, and version.
-- [ ] **Step 3: Implement `NodeRegistry`** with heartbeat compare-and-set and expiry evaluation.
-- [ ] **Step 4: Add scheduler events** for online/degraded/offline/draining transitions.
-- [ ] **Step 5: Run tests and commit `feat: track node health and capacity`**.
+- [x] **Step 1: Write failing tests** for register, heartbeat update, stale heartbeat, drain, disable, capacity validation, and identity rotation.
+- [x] **Step 2: Add node/heartbeat schema** with status, capacity, observed utilization, last heartbeat, drain flag, and version.
+- [x] **Step 3: Implement `NodeRegistry`** with heartbeat compare-and-set and expiry evaluation.
+- [x] **Step 4: Add scheduler events** for online/degraded/offline/draining transitions.
+- [x] **Step 5: Run tests and commit `feat: track node health and capacity`**.
 
 ### Task 3: Implement agent process
 
