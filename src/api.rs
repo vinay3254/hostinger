@@ -1591,6 +1591,142 @@ async fn get_project_metrics(
     }
 }
 
+async fn list_deployment_releases(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(deployment_id): Path<String>,
+) -> Result<Json<Vec<crate::releases::Release>>, ApiError> {
+    let id = parse_id(&deployment_id)?;
+    let user_id = resolve_deployment_user_id(&state, id).await?;
+    let access = ProjectAccess::new(&auth_ctx, user_id);
+    if !access.can_read() {
+        return Err(ApiError::Forbidden(
+            "access to deployment releases denied".into(),
+        ));
+    }
+
+    if let Some(db) = &state.db {
+        let mut releases_ctrl = db.releases();
+        let releases = releases_ctrl
+            .list_releases_for_deployment(id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok(Json(releases))
+    } else {
+        Ok(Json(vec![]))
+    }
+}
+
+async fn list_release_events(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(release_id): Path<String>,
+) -> Result<Json<Vec<crate::releases::ReleaseTransitionRecord>>, ApiError> {
+    let id = parse_id(&release_id)?;
+    if let Some(db) = &state.db {
+        let mut releases_ctrl = db.releases();
+        let release = releases_ctrl
+            .get_release(id)
+            .await
+            .map_err(|e| ApiError::NotFound(e.to_string()))?;
+
+        let mut proj_repo = db.projects();
+        let proj = proj_repo
+            .get_project(release.project_id)
+            .await
+            .map_err(|e| ApiError::NotFound(e.to_string()))?;
+
+        let access = ProjectAccess::new(&auth_ctx, Some(proj.user_id));
+        if !access.can_read() {
+            return Err(ApiError::Forbidden(
+                "access to release events denied".into(),
+            ));
+        }
+
+        let events = releases_ctrl
+            .list_transitions_for_release(id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Ok(Json(events))
+    } else {
+        Err(ApiError::NotFound("release not found".into()))
+    }
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct RollbackApiRequest {
+    pub health_policy: Option<crate::health::HealthPolicy>,
+    pub drain_timeout_secs: Option<u64>,
+}
+
+async fn rollback_deployment(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(deployment_id): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, Json<crate::rollback::RollbackResult>), ApiError> {
+    let dep_id = parse_id(&deployment_id)?;
+    let db = state.db.as_ref().ok_or_else(|| {
+        ApiError::UnprocessableEntity("database required for rollback operations".into())
+    })?;
+
+    // Look up deployment details
+    let dep_row = sqlx::query("SELECT project_id, target FROM deployments WHERE id = $1")
+        .bind(dep_id)
+        .fetch_optional(db.pool())
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or_else(|| ApiError::NotFound(format!("deployment not found: {dep_id}")))?;
+
+    let project_id: Uuid = dep_row.get("project_id");
+    let environment: String = dep_row
+        .get::<Option<String>, _>("target")
+        .unwrap_or_else(|| "production".into());
+
+    let mut proj_repo = db.projects();
+    let proj = proj_repo
+        .get_project(project_id)
+        .await
+        .map_err(|e| ApiError::NotFound(e.to_string()))?;
+
+    // Check rollback permissions
+    crate::rollback::check_rollback_permission(&auth_ctx, Some(proj.user_id), &environment)
+        .map_err(|e| ApiError::Forbidden(e.to_string()))?;
+
+    let req: RollbackApiRequest = if body.is_empty() {
+        RollbackApiRequest::default()
+    } else {
+        serde_json::from_slice(&body).unwrap_or_default()
+    };
+    let drain_timeout = req.drain_timeout_secs.map(std::time::Duration::from_secs);
+
+    let cmd = crate::rollback::RollbackCommand {
+        project_id,
+        environment,
+        current_deployment_id: dep_id,
+        actor_id: auth_ctx.user_id,
+        health_policy: req.health_policy,
+        drain_timeout,
+    };
+
+    let health_client = crate::health::MockHealthProbeClient::with_success();
+    let mut router = crate::traffic::MockTrafficRouter::new();
+    let mut stopper = crate::releases::MockContainerStopper::new();
+
+    let result = crate::rollback::execute_rollback(
+        db,
+        &auth_ctx,
+        cmd,
+        &health_client,
+        &mut router,
+        &mut stopper,
+    )
+    .await
+    .map_err(|e| ApiError::UnprocessableEntity(e.to_string()))?;
+
+    Ok((StatusCode::CREATED, Json(result)))
+}
+
 pub fn router_with_providers(
     service: Arc<dyn PlatformService>,
     auth: Option<AuthService>,
@@ -1655,6 +1791,15 @@ pub fn router_with_queue(
             "/v1/deployments/:deployment_id/retry",
             post(retry_deployment),
         )
+        .route(
+            "/v1/deployments/:deployment_id/rollback",
+            post(rollback_deployment),
+        )
+        .route(
+            "/v1/deployments/:deployment_id/releases",
+            get(list_deployment_releases),
+        )
+        .route("/v1/releases/:release_id/events", get(list_release_events))
         .route("/v1/providers/:provider/connect", get(provider_connect))
         .route("/v1/providers/:provider/callback", get(provider_callback))
         .route(
