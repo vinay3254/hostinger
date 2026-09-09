@@ -318,8 +318,51 @@ export default function DeploymentDetailPage() {
         </div>
         <div>
           <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Cache Status</span>
-          <span style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'monospace' }}>
+          <span
+            style={{
+              display: 'inline-block',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              fontWeight: 600,
+              fontFamily: 'monospace',
+              backgroundColor: deployment.cache_status === 'HIT' ? '#dcfce7' : '#f3f4f6',
+              color: deployment.cache_status === 'HIT' ? '#15803d' : '#4b5563',
+            }}
+          >
             {deployment.cache_status || 'MISS'}
+          </span>
+        </div>
+        <div>
+          <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Cache Key</span>
+          <span
+            title={deployment.cache_key || 'No cache key'}
+            style={{ fontSize: '14px', fontWeight: 500, fontFamily: 'monospace' }}
+          >
+            {deployment.cache_key
+              ? `${deployment.cache_key.substring(0, 16)}...`
+              : 'None'}
+          </span>
+        </div>
+        <div>
+          <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Build Duration</span>
+          <span style={{ fontSize: '14px', fontWeight: 500 }}>
+            {deployment.build_duration_ms != null
+              ? `${(deployment.build_duration_ms / 1000).toFixed(1)}s`
+              : 'N/A'}
+            {deployment.cached_duration_ms != null && (
+              <span style={{ fontSize: '12px', color: '#10b981', marginLeft: '6px' }}>
+                (cached ~{(deployment.cached_duration_ms / 1000).toFixed(1)}s)
+              </span>
+            )}
+          </span>
+        </div>
+        <div>
+          <span style={{ fontSize: '12px', color: '#6b7280', display: 'block', marginBottom: '4px' }}>Artifact Metadata</span>
+          <span style={{ fontSize: '14px', fontWeight: 500 }}>
+            {deployment.artifact_size_bytes != null
+              ? `${(deployment.artifact_size_bytes / 1024 / 1024).toFixed(2)} MB`
+              : deployment.image_path ? 'Packaged' : 'None'}
           </span>
         </div>
         <div>
@@ -392,6 +435,7 @@ export default function DeploymentDetailPage() {
         </h2>
         <LogViewer
           logs={logsData?.logs || ''}
+          deploymentId={deploymentId}
           isStreaming={isBuildingOrQueued && !isLogsError}
           isReconnecting={isBuildingOrQueued && isLogsError}
         />
