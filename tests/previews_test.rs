@@ -118,3 +118,212 @@ async fn preview_identity_uniqueness_and_lifecycle() {
     let after_cleanup = repo.find_by_id(preview1.id).await.unwrap().expect("found");
     assert_eq!(after_cleanup.cleanup_attempt, 1);
 }
+
+use deploy_platform::{
+    preview_events::{PreviewOutcome, PreviewService},
+    providers::{Provider, PullRequestAction, PullRequestRef, SourceEventKind},
+    source_events::SourceEventRecord,
+};
+
+#[tokio::test]
+async fn pull_request_event_lifecycle_and_idempotency() {
+    let db = setup_test_db().await;
+    let (_user_id, project_id) = create_test_user_and_project(&db).await;
+
+    let service = PreviewService::new(db.clone(), None);
+
+    let base_time = OffsetDateTime::now_utc();
+
+    // 1. PR Opened -> Created
+    let pr_ref1 = PullRequestRef {
+        number: 42,
+        head_sha: "commit-sha-1".to_string(),
+        base_branch: "main".to_string(),
+        action: PullRequestAction::Opened,
+    };
+    let event1 = SourceEventRecord {
+        id: Uuid::new_v4(),
+        project_id,
+        provider: Provider::GitHub,
+        delivery_id: "deliv-1".to_string(),
+        kind: SourceEventKind::PullRequestOpened,
+        commit_sha: "commit-sha-1".to_string(),
+        branch: Some("feature/login".to_string()),
+        pull_request: Some(pr_ref1),
+        idempotency_key: "github:deliv-1:commit-sha-1".to_string(),
+        created_at: base_time,
+    };
+
+    let outcome1 = service
+        .apply_event(&event1)
+        .await
+        .expect("applied event 1")
+        .expect("expected outcome");
+    let (preview_id, dep1) = match outcome1 {
+        PreviewOutcome::Created {
+            preview_id,
+            deployment_id,
+        } => (preview_id, deployment_id),
+        other => panic!("expected Created outcome, got {:?}", other),
+    };
+
+    let mut repo = PreviewRepository::new(db.pool().into());
+    let preview = repo.find_by_id(preview_id).await.unwrap().unwrap();
+    assert_eq!(preview.status, PreviewStatus::Building);
+    assert_eq!(preview.deployment_id, Some(dep1));
+    assert_eq!(preview.head_sha, "commit-sha-1");
+    assert!(preview.hostname.contains("pr-42"));
+
+    // 2. PR Synchronized (new commit) -> Updated
+    let pr_ref2 = PullRequestRef {
+        number: 42,
+        head_sha: "commit-sha-2".to_string(),
+        base_branch: "main".to_string(),
+        action: PullRequestAction::Synchronize,
+    };
+    let event2 = SourceEventRecord {
+        id: Uuid::new_v4(),
+        project_id,
+        provider: Provider::GitHub,
+        delivery_id: "deliv-2".to_string(),
+        kind: SourceEventKind::PullRequestUpdated,
+        commit_sha: "commit-sha-2".to_string(),
+        branch: Some("feature/login".to_string()),
+        pull_request: Some(pr_ref2),
+        idempotency_key: "github:deliv-2:commit-sha-2".to_string(),
+        created_at: base_time + time::Duration::seconds(10),
+    };
+
+    let outcome2 = service
+        .apply_event(&event2)
+        .await
+        .expect("applied event 2")
+        .expect("expected outcome");
+    let dep2 = match outcome2 {
+        PreviewOutcome::Updated {
+            preview_id: p_id,
+            deployment_id,
+        } => {
+            assert_eq!(p_id, preview_id);
+            deployment_id
+        }
+        other => panic!("expected Updated outcome, got {:?}", other),
+    };
+    assert_ne!(dep1, dep2);
+
+    let preview = repo.find_by_id(preview_id).await.unwrap().unwrap();
+    assert_eq!(preview.head_sha, "commit-sha-2");
+    assert_eq!(preview.deployment_id, Some(dep2));
+
+    // 3. Duplicate delivery of event 2 -> Unchanged
+    let outcome_dup = service
+        .apply_event(&event2)
+        .await
+        .expect("applied duplicate")
+        .expect("expected outcome");
+    match outcome_dup {
+        PreviewOutcome::Unchanged { preview_id: p_id } => assert_eq!(p_id, preview_id),
+        other => panic!("expected Unchanged outcome, got {:?}", other),
+    }
+
+    // 4. Older event arriving late -> IgnoredOlder
+    let pr_ref_old = PullRequestRef {
+        number: 42,
+        head_sha: "commit-sha-0".to_string(),
+        base_branch: "main".to_string(),
+        action: PullRequestAction::Synchronize,
+    };
+    let event_old = SourceEventRecord {
+        id: Uuid::new_v4(),
+        project_id,
+        provider: Provider::GitHub,
+        delivery_id: "deliv-old".to_string(),
+        kind: SourceEventKind::PullRequestUpdated,
+        commit_sha: "commit-sha-0".to_string(),
+        branch: Some("feature/login".to_string()),
+        pull_request: Some(pr_ref_old),
+        idempotency_key: "github:deliv-old:commit-sha-0".to_string(),
+        created_at: base_time - time::Duration::seconds(5),
+    };
+    let outcome_old = service
+        .apply_event(&event_old)
+        .await
+        .expect("applied older event")
+        .expect("expected outcome");
+    match outcome_old {
+        PreviewOutcome::IgnoredOlder { preview_id: p_id } => assert_eq!(p_id, preview_id),
+        other => panic!("expected IgnoredOlder outcome, got {:?}", other),
+    }
+    let preview = repo.find_by_id(preview_id).await.unwrap().unwrap();
+    assert_eq!(preview.head_sha, "commit-sha-2");
+
+    // 5. PR Closed -> Closed
+    let pr_ref_closed = PullRequestRef {
+        number: 42,
+        head_sha: "commit-sha-2".to_string(),
+        base_branch: "main".to_string(),
+        action: PullRequestAction::Closed,
+    };
+    let event_closed = SourceEventRecord {
+        id: Uuid::new_v4(),
+        project_id,
+        provider: Provider::GitHub,
+        delivery_id: "deliv-closed".to_string(),
+        kind: SourceEventKind::PullRequestClosed,
+        commit_sha: "commit-sha-2".to_string(),
+        branch: Some("feature/login".to_string()),
+        pull_request: Some(pr_ref_closed),
+        idempotency_key: "github:deliv-closed:commit-sha-2".to_string(),
+        created_at: base_time + time::Duration::seconds(20),
+    };
+    let outcome_closed = service
+        .apply_event(&event_closed)
+        .await
+        .expect("applied closed event")
+        .expect("expected outcome");
+    match outcome_closed {
+        PreviewOutcome::Closed { preview_id: p_id } => assert_eq!(p_id, preview_id),
+        other => panic!("expected Closed outcome, got {:?}", other),
+    }
+    let preview = repo.find_by_id(preview_id).await.unwrap().unwrap();
+    assert_eq!(preview.status, PreviewStatus::Closed);
+    assert!(preview.closed_at.is_some());
+
+    // 6. PR Reopened -> Updated/Reopened
+    let pr_ref_reopened = PullRequestRef {
+        number: 42,
+        head_sha: "commit-sha-3".to_string(),
+        base_branch: "main".to_string(),
+        action: PullRequestAction::Reopened,
+    };
+    let event_reopened = SourceEventRecord {
+        id: Uuid::new_v4(),
+        project_id,
+        provider: Provider::GitHub,
+        delivery_id: "deliv-reopened".to_string(),
+        kind: SourceEventKind::PullRequestOpened,
+        commit_sha: "commit-sha-3".to_string(),
+        branch: Some("feature/login".to_string()),
+        pull_request: Some(pr_ref_reopened),
+        idempotency_key: "github:deliv-reopened:commit-sha-3".to_string(),
+        created_at: base_time + time::Duration::seconds(30),
+    };
+    let outcome_reopened = service
+        .apply_event(&event_reopened)
+        .await
+        .expect("applied reopened event")
+        .expect("expected outcome");
+    match outcome_reopened {
+        PreviewOutcome::Updated {
+            preview_id: p_id,
+            deployment_id,
+        } => {
+            assert_eq!(p_id, preview_id);
+            assert_ne!(deployment_id, dep2);
+        }
+        other => panic!("expected Updated outcome on reopen, got {:?}", other),
+    }
+    let preview = repo.find_by_id(preview_id).await.unwrap().unwrap();
+    assert_eq!(preview.status, PreviewStatus::Building);
+    assert_eq!(preview.head_sha, "commit-sha-3");
+}
