@@ -63,11 +63,11 @@ pub trait TrafficRouter {
 
 ### Task 3: Implement rollback
 
-- [ ] **Step 1: Write failing tests** for no predecessor, failed predecessor, exact artifact reuse, production permission, and rollback audit event.
-- [ ] **Step 2: Implement `select_rollback_target(project, environment, deployment_id)`** using only healthy releases with retained artifacts.
-- [ ] **Step 3: Create a new deployment with cause `rollback`** and source/artifact references copied immutably from the target.
-- [ ] **Step 4: Run it through the normal health-gated release controller** and record previous/new active release IDs.
-- [ ] **Step 5: Run rollback tests and commit `feat: add auditable deployment rollback`**.
+- [x] **Step 1: Write failing tests** for no predecessor, failed predecessor, exact artifact reuse, production permission, and rollback audit event.
+- [x] **Step 2: Implement `select_rollback_target(project, environment, deployment_id)`** using only healthy releases with retained artifacts.
+- [x] **Step 3: Create a new deployment with cause `rollback`** and source/artifact references copied immutably from the target.
+- [x] **Step 4: Run it through the normal health-gated release controller** and record previous/new active release IDs.
+- [x] **Step 5: Run rollback tests and commit `feat: add auditable deployment rollback`**.
 
 ### Task 4: Add API and dashboard controls
 
