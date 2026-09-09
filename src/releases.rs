@@ -1,8 +1,10 @@
+use crate::health::{HealthPolicy, HealthProbeClient};
 use crate::repository::DbExecutor;
 use crate::traffic::TrafficRouter;
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::time::Duration;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -103,6 +105,47 @@ pub struct ReleaseTransitionRecord {
     pub reason: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+}
+
+pub trait ContainerStopper: Send + Sync {
+    fn stop_container(&mut self, container_id: &str) -> Result<()>;
+}
+
+#[derive(Default, Clone)]
+pub struct MockContainerStopper {
+    pub stopped: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl MockContainerStopper {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl ContainerStopper for MockContainerStopper {
+    fn stop_container(&mut self, container_id: &str) -> Result<()> {
+        self.stopped.lock().unwrap().push(container_id.to_string());
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReleaseOrchestrationPlan {
+    pub deployment_id: Uuid,
+    pub project_id: Uuid,
+    pub environment: String,
+    pub container_id: String,
+    pub port: i32,
+    pub url: String,
+    pub health_policy: HealthPolicy,
+    pub drain_timeout: Duration,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReleaseOrchestrationResult {
+    pub active_release: Release,
+    pub previous_release: Option<Release>,
+    pub drain_result: Option<crate::traffic::DrainResult>,
 }
 
 pub struct ReleaseController<'a> {
@@ -427,6 +470,112 @@ impl<'a> ReleaseController<'a> {
         Ok(prev_active)
     }
 
+    pub async fn orchestrate_release(
+        &mut self,
+        plan: ReleaseOrchestrationPlan,
+        health_client: &(dyn HealthProbeClient + Send + Sync),
+        router: &mut dyn TrafficRouter,
+        container_stopper: &mut dyn ContainerStopper,
+    ) -> Result<ReleaseOrchestrationResult> {
+        // Step 1: Create release in Starting
+        let mut release = self
+            .create_release(
+                plan.deployment_id,
+                plan.project_id,
+                &plan.environment,
+                Some(plan.container_id.clone()),
+                Some(plan.port),
+                Some(plan.url.clone()),
+            )
+            .await?;
+
+        // Step 2: Transition to HealthChecking
+        release = self
+            .transition(
+                release.id,
+                release.version,
+                ReleaseStatus::HealthChecking,
+                Some("probing container health"),
+            )
+            .await?;
+
+        // Step 3: Probe health
+        let health_res =
+            crate::health::wait_until_healthy(health_client, &plan.url, &plan.health_policy).await;
+
+        if !health_res.is_healthy {
+            let error_msg = health_res
+                .final_error
+                .unwrap_or_else(|| "health check failed".to_string());
+            // Stop failed replacement container
+            let _ = container_stopper.stop_container(&plan.container_id);
+            // Transition release to Failed (old release remains completely active and untouched)
+            let _ = self
+                .transition(
+                    release.id,
+                    release.version,
+                    ReleaseStatus::Failed,
+                    Some(&format!("health check failed: {error_msg}")),
+                )
+                .await?;
+            return Err(anyhow!("release health check failed: {error_msg}"));
+        }
+
+        // Step 4: Health check passed -> Transition to Ready
+        release = self
+            .transition(
+                release.id,
+                release.version,
+                ReleaseStatus::Ready,
+                Some("health check passed"),
+            )
+            .await?;
+
+        // Step 5: Activate traffic via router and upsert active_routes
+        let prev_release = self.activate_traffic(&release, router).await?;
+        release = self.get_release(release.id).await?;
+
+        // Step 6: Drain and stop previous active release if present
+        let mut drain_result = None;
+        let mut drained_prev = None;
+
+        if let Some(prev) = prev_release {
+            let prev_draining = self
+                .transition(
+                    prev.id,
+                    prev.version,
+                    ReleaseStatus::Draining,
+                    Some("traffic switched to new release"),
+                )
+                .await?;
+
+            let prev_route = router.prepare(&prev_draining)?;
+            let drain_res = router.drain(&prev_route, plan.drain_timeout)?;
+            drain_result = Some(drain_res);
+            let _ = router.remove(&prev_route);
+
+            if let Some(ref cid) = prev_draining.container_id {
+                let _ = container_stopper.stop_container(cid);
+            }
+
+            let prev_stopped = self
+                .transition(
+                    prev_draining.id,
+                    prev_draining.version,
+                    ReleaseStatus::Stopped,
+                    Some("drain complete, container stopped"),
+                )
+                .await?;
+            drained_prev = Some(prev_stopped);
+        }
+
+        Ok(ReleaseOrchestrationResult {
+            active_release: release,
+            previous_release: drained_prev,
+            drain_result,
+        })
+    }
+
     pub async fn reconcile_crashed_releases(&mut self) -> Result<Vec<Release>> {
         // Find releases in intermediate states: starting, health_checking, draining
         let rows = self
@@ -471,5 +620,108 @@ impl<'a> ReleaseController<'a> {
         }
 
         Ok(reconciled)
+    }
+
+    pub async fn reconcile_crashed_releases_full(
+        &mut self,
+        mut container_stopper: Option<&mut dyn ContainerStopper>,
+        mut router: Option<&mut dyn TrafficRouter>,
+    ) -> Result<Vec<Release>> {
+        let rows = self
+            .executor
+            .fetch_all(
+                sqlx::query(
+                    "SELECT id, deployment_id, project_id, environment, status, version, container_id, port, url, created_at, updated_at
+                     FROM releases
+                     WHERE status IN ('starting', 'health_checking', 'ready', 'draining')
+                     ORDER BY created_at ASC",
+                ),
+            )
+            .await
+            .context("failed to query crashed releases")?;
+
+        let mut reconciled = Vec::new();
+        for row in rows {
+            let rel_id: Uuid = row.get("id");
+            let project_id: Uuid = row.get("project_id");
+            let environment: String = row.get("environment");
+            let version: i32 = row.get("version");
+            let status_str: String = row.get("status");
+            let container_id: Option<String> = row.get("container_id");
+            let status = ReleaseStatus::parse(&status_str)?;
+
+            // Check if this release is currently active in active_routes
+            let active = self.get_active_release(project_id, &environment).await?;
+            let is_active_route = active.as_ref().map(|a| a.id) == Some(rel_id);
+
+            let (target, reason) = match status {
+                ReleaseStatus::Starting | ReleaseStatus::HealthChecking => (
+                    ReleaseStatus::Failed,
+                    "reconciled failed: release interrupted in startup/health check during host crash",
+                ),
+                ReleaseStatus::Ready => {
+                    if is_active_route {
+                        (
+                            ReleaseStatus::Active,
+                            "reconciled active: release was registered in active_routes",
+                        )
+                    } else {
+                        (
+                            ReleaseStatus::Failed,
+                            "reconciled failed: release was ready but never received traffic before host crash",
+                        )
+                    }
+                }
+                ReleaseStatus::Draining => (
+                    ReleaseStatus::Stopped,
+                    "reconciled stopped: drain completed after host crash recovery",
+                ),
+                _ => continue,
+            };
+
+            // If stopping/failing and container exists, stop container
+            if target == ReleaseStatus::Failed || target == ReleaseStatus::Stopped {
+                if let (Some(cid), Some(stopper)) =
+                    (&container_id, container_stopper.as_deref_mut())
+                {
+                    let _ = stopper.stop_container(cid);
+                }
+            }
+
+            if status == ReleaseStatus::Draining {
+                if let Some(r) = router.as_deref_mut() {
+                    let rel = self.get_release(rel_id).await?;
+                    if let Ok(handle) = r.prepare(&rel) {
+                        let _ = r.remove(&handle);
+                    }
+                }
+            }
+
+            if let Ok(updated) = self.transition(rel_id, version, target, Some(reason)).await {
+                reconciled.push(updated);
+            }
+        }
+
+        Ok(reconciled)
+    }
+}
+
+pub struct ReleaseRecoveryWorker<'a> {
+    controller: ReleaseController<'a>,
+}
+
+impl<'a> ReleaseRecoveryWorker<'a> {
+    pub fn new(controller: ReleaseController<'a>) -> Self {
+        Self { controller }
+    }
+
+    pub async fn run_recovery(
+        &mut self,
+        container_stopper: Option<&mut dyn ContainerStopper>,
+        router: Option<&mut dyn TrafficRouter>,
+    ) -> Result<Vec<Release>> {
+        self.controller
+            .reconcile_crashed_releases_full(container_stopper, router)
+            .await
     }
 }
