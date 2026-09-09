@@ -8,6 +8,7 @@ pub mod config;
 pub mod db;
 pub mod detector;
 pub mod framework;
+pub mod health;
 pub mod hostname;
 pub mod logs;
 pub mod metrics;
