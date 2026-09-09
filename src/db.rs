@@ -89,6 +89,10 @@ impl Database {
     pub fn metrics(&self) -> crate::metrics::MetricRepository<'_> {
         crate::metrics::MetricRepository::new(DbExecutor::Pool(&self.pool))
     }
+
+    pub fn releases(&self) -> crate::releases::ReleaseController<'_> {
+        crate::releases::ReleaseController::new(DbExecutor::Pool(&self.pool))
+    }
 }
 
 pub struct DbTransaction {
@@ -134,6 +138,10 @@ impl DbTransaction {
 
     pub fn metrics(&mut self) -> crate::metrics::MetricRepository<'_> {
         crate::metrics::MetricRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub fn releases(&mut self) -> crate::releases::ReleaseController<'_> {
+        crate::releases::ReleaseController::new(DbExecutor::Tx(&mut self.tx))
     }
 
     pub async fn commit(self) -> Result<()> {
