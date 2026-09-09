@@ -75,6 +75,7 @@ async fn duplicate_enqueue_is_idempotent() {
         project_id,
         priority: JobPriority::Production,
         max_attempts: 3,
+        force_rebuild: false,
     };
 
     let job1 = queue.enqueue(input.clone()).await.unwrap();
@@ -104,6 +105,7 @@ async fn priority_ordering_production_over_preview() {
             project_id: proj1,
             priority: JobPriority::Preview,
             max_attempts: 3,
+            force_rebuild: false,
         })
         .await
         .unwrap();
@@ -114,6 +116,7 @@ async fn priority_ordering_production_over_preview() {
             project_id: proj2,
             priority: JobPriority::Production,
             max_attempts: 3,
+            force_rebuild: false,
         })
         .await
         .unwrap();
@@ -166,6 +169,7 @@ async fn lease_renewal_and_expiry_requeue() {
             project_id,
             priority: JobPriority::Production,
             max_attempts: 3,
+            force_rebuild: false,
         })
         .await
         .unwrap();
@@ -225,6 +229,7 @@ async fn retry_and_dead_letter_transition() {
             project_id,
             priority: JobPriority::Production,
             max_attempts: 2,
+            force_rebuild: false,
         })
         .await
         .unwrap();
@@ -295,6 +300,7 @@ async fn cancellation_prevents_execution() {
             project_id,
             priority: JobPriority::Production,
             max_attempts: 3,
+            force_rebuild: false,
         })
         .await
         .unwrap();
