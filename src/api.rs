@@ -16,6 +16,7 @@ use axum::{
     Json, Router,
 };
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use sqlx::Row;
 use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -50,10 +51,7 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
-#[derive(serde::Serialize)]
-pub struct LogsResponse {
-    pub logs: String,
-}
+pub use crate::logs::LogsResponse;
 
 pub enum ApiError {
     BadRequest(String),
@@ -422,25 +420,191 @@ async fn get_deployment(
     Ok(Json(deployment))
 }
 
-async fn get_deployment_logs(
-    State(state): State<ApiState>,
-    auth_ctx: AuthContext,
-    Path(deployment_id): Path<String>,
-) -> Result<Json<LogsResponse>, ApiError> {
-    let id = parse_id(&deployment_id)?;
+async fn resolve_deployment_user_id(
+    state: &ApiState,
+    id: Uuid,
+) -> Result<Option<Uuid>, ApiError> {
+    if let Some(db) = &state.db {
+        let dep_row = sqlx::query("SELECT project_id FROM deployments WHERE id = $1")
+            .bind(id)
+            .fetch_optional(db.pool())
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        if let Some(dep_row) = dep_row {
+            let proj_id: Uuid = dep_row.get("project_id");
+            let mut proj_repo = db.projects();
+            let proj = proj_repo
+                .get_project(proj_id)
+                .await
+                .map_err(|e| ApiError::NotFound(e.to_string()))?;
+            return Ok(Some(proj.user_id));
+        }
+    }
     let deployment = state.service.deployment(id).map_err(map_service_err)?;
     let project = state
         .service
         .project(deployment.project_id)
         .map_err(map_service_err)?;
-    let access = ProjectAccess::new(&auth_ctx, project.user_id);
+    Ok(project.user_id)
+}
+
+async fn get_deployment_logs(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(deployment_id): Path<String>,
+    Query(query): Query<crate::logs::LogQuery>,
+) -> Result<Json<LogsResponse>, ApiError> {
+    let id = parse_id(&deployment_id)?;
+    let user_id = resolve_deployment_user_id(&state, id).await?;
+
+    let access = ProjectAccess::new(&auth_ctx, user_id);
     if !access.can_read() {
         return Err(ApiError::Forbidden(
             "access to deployment logs denied".into(),
         ));
     }
+
+    if let Some(db) = &state.db {
+        let mut repo = db.logs();
+        let resp = repo
+            .query_logs(id, &query)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        if !resp.lines.is_empty() || state.service.logs(id).is_err() {
+            return Ok(Json(resp));
+        }
+    }
+
     let logs = state.service.logs(id).map_err(map_service_err)?;
-    Ok(Json(LogsResponse { logs }))
+    Ok(Json(crate::logs::LogsResponse {
+        lines: vec![crate::logs::LogEntry {
+            sequence: 1,
+            timestamp: time::OffsetDateTime::now_utc(),
+            stream: "stdout".into(),
+            message: logs.clone(),
+        }],
+        next_sequence: Some(1),
+        has_more: false,
+        is_terminal: true,
+        logs,
+    }))
+}
+
+async fn download_deployment_logs(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(deployment_id): Path<String>,
+) -> Result<Response, ApiError> {
+    let id = parse_id(&deployment_id)?;
+    let user_id = resolve_deployment_user_id(&state, id).await?;
+
+    let access = ProjectAccess::new(&auth_ctx, user_id);
+    if !access.can_read() {
+        return Err(ApiError::Forbidden(
+            "access to deployment logs denied".into(),
+        ));
+    }
+
+    let body = if let Some(db) = &state.db {
+        let mut repo = db.logs();
+        let full = repo
+            .get_full_log(id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        if !full.is_empty() || state.service.logs(id).is_err() {
+            full
+        } else {
+            state.service.logs(id).unwrap_or_default()
+        }
+    } else {
+        state.service.logs(id).map_err(map_service_err)?
+    };
+
+    let filename = format!("deployment-{id}.log");
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/plain; charset=utf-8")
+        .header(
+            "Content-Disposition",
+            format!("attachment; filename=\"{filename}\""),
+        )
+        .body(axum::body::Body::from(body))
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(response)
+}
+
+async fn stream_deployment_logs(
+    State(state): State<ApiState>,
+    auth_ctx: AuthContext,
+    Path(deployment_id): Path<String>,
+    Query(query): Query<crate::logs::LogQuery>,
+) -> Result<
+    axum::response::sse::Sse<
+        tokio_stream::wrappers::ReceiverStream<
+            Result<axum::response::sse::Event, std::convert::Infallible>,
+        >,
+    >,
+    ApiError,
+> {
+    let id = parse_id(&deployment_id)?;
+    let user_id = resolve_deployment_user_id(&state, id).await?;
+
+    let access = ProjectAccess::new(&auth_ctx, user_id);
+    if !access.can_read() {
+        return Err(ApiError::Forbidden(
+            "access to deployment logs denied".into(),
+        ));
+    }
+
+    let (tx, rx) = tokio::sync::mpsc::channel(100);
+    let db_opt = state.db.clone();
+    let after_seq = query.after_sequence.unwrap_or(0);
+
+    tokio::spawn(async move {
+        let mut last_seq = after_seq;
+        loop {
+            if let Some(db) = &db_opt {
+                let mut repo = db.logs();
+                let q = crate::logs::LogQuery {
+                    after_sequence: Some(last_seq),
+                    limit: Some(100),
+                    stream: None,
+                };
+                if let Ok(resp) = repo.query_logs(id, &q).await {
+                    for entry in resp.lines {
+                        last_seq = entry.sequence;
+                        let json_data = serde_json::to_string(&entry).unwrap_or_default();
+                        let event = axum::response::sse::Event::default()
+                            .event("log")
+                            .id(last_seq.to_string())
+                            .data(json_data);
+                        if tx.send(Ok(event)).await.is_err() {
+                            return;
+                        }
+                    }
+                    if resp.is_terminal && !resp.has_more {
+                        let done_event = axum::response::sse::Event::default()
+                            .event("done")
+                            .data("{\"done\":true}");
+                        let _ = tx.send(Ok(done_event)).await;
+                        break;
+                    }
+                }
+            } else {
+                let done_event = axum::response::sse::Event::default()
+                    .event("done")
+                    .data("{\"done\":true}");
+                let _ = tx.send(Ok(done_event)).await;
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    });
+
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+    Ok(axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
 }
 
 async fn stop_deployment(
@@ -1401,6 +1565,14 @@ pub fn router_with_queue(
         .route(
             "/v1/deployments/:deployment_id/logs",
             get(get_deployment_logs),
+        )
+        .route(
+            "/v1/deployments/:deployment_id/logs/download",
+            get(download_deployment_logs),
+        )
+        .route(
+            "/v1/deployments/:deployment_id/logs/stream",
+            get(stream_deployment_logs),
         )
         .route("/v1/deployments/:deployment_id/stop", post(stop_deployment))
         .route(
