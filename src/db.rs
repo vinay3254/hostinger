@@ -77,6 +77,10 @@ impl Database {
     pub fn previews(&self) -> crate::previews::PreviewRepository<'_> {
         crate::previews::PreviewRepository::new(DbExecutor::Pool(&self.pool))
     }
+
+    pub fn cache(&self) -> crate::cache::BuildCacheRepository<'_> {
+        crate::cache::BuildCacheRepository::new(DbExecutor::Pool(&self.pool))
+    }
 }
 
 pub struct DbTransaction {
@@ -110,6 +114,10 @@ impl DbTransaction {
 
     pub fn previews(&mut self) -> crate::previews::PreviewRepository<'_> {
         crate::previews::PreviewRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub fn cache(&mut self) -> crate::cache::BuildCacheRepository<'_> {
+        crate::cache::BuildCacheRepository::new(DbExecutor::Tx(&mut self.tx))
     }
 
     pub async fn commit(self) -> Result<()> {
