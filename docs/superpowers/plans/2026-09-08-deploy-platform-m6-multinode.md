@@ -62,12 +62,12 @@
 
 ### Task 4: Implement scheduler placement and rescheduling
 
-- [ ] **Step 1: Write failing tests** for CPU/memory bin-packing, capacity rejection, anti-affinity, draining nodes, lease expiry, and failed-start reschedule.
-- [ ] **Step 2: Implement `PlacementRequest`, `PlacementDecision`, and a deterministic weighted bin-packing scorer.**
-- [ ] **Step 3: Persist desired release/node placement and operation lease** before calling the agent.
-- [ ] **Step 4: Reconcile desired state after scheduler restart** and retry only idempotent incomplete operations.
-- [ ] **Step 5: Add node failure handling** with grace period, replacement decision, and M5 traffic release reconciliation.
-- [ ] **Step 6: Run scheduler tests and commit `feat: add multi node scheduler`**.
+- [x] **Step 1: Write failing tests** for CPU/memory bin-packing, capacity rejection, anti-affinity, draining nodes, lease expiry, and failed-start reschedule.
+- [x] **Step 2: Implement `PlacementRequest`, `PlacementDecision`, and a deterministic weighted bin-packing scorer.**
+- [x] **Step 3: Persist desired release/node placement and operation lease** before calling the agent.
+- [x] **Step 4: Reconcile desired state after scheduler restart** and retry only idempotent incomplete operations.
+- [x] **Step 5: Add node failure handling** with grace period, replacement decision, and M5 traffic release reconciliation.
+- [x] **Step 6: Run scheduler tests and commit `feat: add multi node scheduler`**.
 
 ### Task 5: Add admin API/dashboard
 
