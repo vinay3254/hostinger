@@ -36,10 +36,10 @@
 
 ### Task 1: Define release and traffic contracts
 
-- [ ] **Step 1: Write failing tests** for valid/invalid release transitions, duplicate activation, crash recovery from each intermediate state, and stale release version.
-- [ ] **Step 2: Add release/traffic migration** with unique active route per project/environment and append-only transition records.
-- [ ] **Step 3: Implement `ReleaseController`** with transactional transition methods and compare-and-set version checks.
-- [ ] **Step 4: Define:**
+- [x] **Step 1: Write failing tests** for valid/invalid release transitions, duplicate activation, crash recovery from each intermediate state, and stale release version.
+- [x] **Step 2: Add release/traffic migration** with unique active route per project/environment and append-only transition records.
+- [x] **Step 3: Implement `ReleaseController`** with transactional transition methods and compare-and-set version checks.
+- [x] **Step 4: Define:**
 
 ```rust
 pub trait TrafficRouter {
@@ -50,7 +50,7 @@ pub trait TrafficRouter {
 }
 ```
 
-- [ ] **Step 5: Run tests and commit `feat: add release and traffic contracts`**.
+- [x] **Step 5: Run tests and commit `feat: add release and traffic contracts`**.
 
 ### Task 2: Implement health-gated release orchestration
 
