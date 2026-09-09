@@ -148,6 +148,61 @@ test.describe('Dashboard E2E Workflow with Mocked API', () => {
       });
     });
 
+    // Mock /v1/deployments/dep-1234/releases
+    await page.route('**/v1/deployments/dep-1234/releases', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'rel-1',
+            deployment_id: 'dep-1234',
+            version: 1,
+            container_id: 'c-1234',
+            port: 43123,
+            status: 'active',
+            is_active_route: true,
+            health_checked_at: new Date().toISOString(),
+            activated_at: new Date().toISOString(),
+            created_at: new Date().toISOString(),
+          },
+        ]),
+      });
+    });
+
+    // Mock /v1/releases/rel-1/events
+    await page.route('**/v1/releases/rel-1/events', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'evt-1',
+            release_id: 'rel-1',
+            from_status: 'ready',
+            to_status: 'active',
+            reason: 'Traffic cutover complete',
+            created_at: new Date().toISOString(),
+          },
+        ]),
+      });
+    });
+
+    // Mock /v1/deployments/dep-1234/rollback
+    await page.route('**/v1/deployments/dep-1234/rollback', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'rolled_back',
+          rollback_deployment_id: 'dep-rb-5678',
+          target_release_id: 'rel-1',
+          previous_healthy_deployment_id: 'dep-1234',
+          active_route_url: 'http://127.0.0.1:43123',
+        }),
+      });
+    });
+
     // Mock /v1/providers/github/repositories
     await page.route('**/v1/providers/github/repositories', async (route) => {
       await route.fulfill({
@@ -438,4 +493,27 @@ test.describe('Dashboard E2E Workflow with Mocked API', () => {
     await page.click('button:has-text("Clear Build Cache")');
     await expect(page.getByText(/Project build cache cleared successfully/i)).toBeVisible();
   });
+
+  test('user views release pipeline progress and initiates rollback', async ({ page }) => {
+    await page.goto('/projects/proj-1234/deployments/dep-1234');
+    await expect(page.getByText('Zero-Downtime Release Pipeline')).toBeVisible();
+    await expect(page.getByText('Active Route Protected')).toBeVisible();
+    await expect(page.getByText('Live Traffic', { exact: true })).toBeVisible();
+
+    // Toggle release event audit trail
+    await page.click('button:has-text("View Events")');
+    await expect(page.getByText(/Traffic cutover complete/i)).toBeVisible();
+
+    // Open rollback dialog
+    await page.click('button[data-testid="rollback-button"]');
+    await expect(page.getByRole('heading', { name: 'Rollback Deployment' })).toBeVisible();
+
+    // Confirm checkbox and execute
+    await page.click('input[type="checkbox"]');
+    await page.click('button:has-text("Confirm Rollback")');
+
+    // Dialog closes
+    await expect(page.getByRole('heading', { name: 'Rollback Deployment' })).not.toBeVisible();
+  });
 });
+
