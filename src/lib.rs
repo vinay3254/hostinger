@@ -1,4 +1,6 @@
+pub mod agent_client;
 pub mod agent_protocol;
+pub mod agent_server;
 pub mod api;
 pub mod artifacts;
 pub mod auth;
