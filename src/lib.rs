@@ -19,6 +19,7 @@ pub mod providers;
 pub mod queue;
 pub mod releases;
 pub mod repository;
+pub mod rollback;
 pub mod runtime;
 pub mod service;
 pub mod source_checkout;
