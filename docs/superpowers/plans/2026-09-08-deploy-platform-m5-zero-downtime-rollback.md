@@ -54,12 +54,12 @@ pub trait TrafficRouter {
 
 ### Task 2: Implement health-gated release orchestration
 
-- [ ] **Step 1: Write failing tests** for healthy replacement, timeout, non-2xx response, crash during activation, and old-release preservation.
-- [ ] **Step 2: Implement `HealthPolicy`** with path, port, interval, timeout, attempts, expected status, and startup grace period.
-- [ ] **Step 3: Implement `wait_until_healthy`** with cancellation and structured attempt records.
-- [ ] **Step 4: Orchestrate start → health → prepare → activate → drain → stop** with durable transition after each external side effect.
-- [ ] **Step 5: Add recovery worker** that reconciles `starting`, `ready`, or `draining` releases after restart.
-- [ ] **Step 6: Run tests with fake runtime/router and commit `feat: add health gated releases`**.
+- [x] **Step 1: Write failing tests** for healthy replacement, timeout, non-2xx response, crash during activation, and old-release preservation.
+- [x] **Step 2: Implement `HealthPolicy`** with path, port, interval, timeout, attempts, expected status, and startup grace period.
+- [x] **Step 3: Implement `wait_until_healthy`** with cancellation and structured attempt records.
+- [x] **Step 4: Orchestrate start → health → prepare → activate → drain → stop** with durable transition after each external side effect.
+- [x] **Step 5: Add recovery worker** that reconciles `starting`, `ready`, or `draining` releases after restart.
+- [x] **Step 6: Run tests with fake runtime/router and commit `feat: add health gated releases`**.
 
 ### Task 3: Implement rollback
 
