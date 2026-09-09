@@ -218,6 +218,19 @@ export const AppShell: React.FC<AppShellProps> = ({ children, currentProjectId }
           >
             Previews
           </Link>
+          <Link
+            href={`/projects/${currentProjectId}/metrics`}
+            style={{
+              fontSize: '13px',
+              fontWeight: pathname.includes('/metrics') ? 600 : 400,
+              color: pathname.includes('/metrics') ? '#111827' : '#6b7280',
+              borderBottom: pathname.includes('/metrics') ? '2px solid #111827' : 'none',
+              padding: '12px 0',
+              textDecoration: 'none',
+            }}
+          >
+            Metrics
+          </Link>
         </div>
       )}
 
