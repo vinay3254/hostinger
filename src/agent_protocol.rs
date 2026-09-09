@@ -185,6 +185,20 @@ pub struct HealthResponse {
     pub uptime_secs: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum AgentResponse {
+    RegisterNode(RegisterNodeResponse),
+    Heartbeat(HeartbeatResponse),
+    CreateRelease(CreateReleaseResponse),
+    StartRelease(StartReleaseResponse),
+    StopRelease(StopReleaseResponse),
+    DrainRelease(DrainReleaseResponse),
+    ReleaseLogs(ReleaseLogsResponse),
+    ReleaseStats(ReleaseStatsResponse),
+    Health(HealthResponse),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentEnvelope {
     pub version: String,
