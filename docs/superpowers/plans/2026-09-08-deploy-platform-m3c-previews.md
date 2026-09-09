@@ -50,12 +50,12 @@
 
 ### Task 3: Integrate preview build/runtime/release lifecycle
 
-- [ ] **Step 1: Write failing tests** for preview build success, failed build preserving prior preview, health failure cleanup, and promote-to-production source equality.
-- [ ] **Step 2: Pass preview target and isolated env scope into `BuildJob`.**
-- [ ] **Step 3: Allocate preview port/route through the runtime/release interface** and persist URL only after health succeeds.
-- [ ] **Step 4: Implement idempotent teardown** that stops release, removes route, and marks preview stopped while retaining logs/history.
-- [ ] **Step 5: Implement promotion** as a new production deployment referencing the exact preview commit and build artifact where compatible.
-- [ ] **Step 6: Run integration tests with fake queue/runtime and commit `feat: manage preview runtime lifecycle`**.
+- [x] **Step 1: Write failing tests** for preview build success, failed build preserving prior preview, health failure cleanup, and promote-to-production source equality.
+- [x] **Step 2: Pass preview target and isolated env scope into `BuildJob`.**
+- [x] **Step 3: Allocate preview port/route through the runtime/release interface** and persist URL only after health succeeds.
+- [x] **Step 4: Implement idempotent teardown** that stops release, removes route, and marks preview stopped while retaining logs/history.
+- [x] **Step 5: Implement promotion** as a new production deployment referencing the exact preview commit and build artifact where compatible.
+- [x] **Step 6: Run integration tests with fake queue/runtime and commit `feat: manage preview runtime lifecycle`**.
 
 ### Task 4: Add preview API and dashboard
 
