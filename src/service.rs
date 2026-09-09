@@ -125,6 +125,8 @@ impl<R: Runtime + Send, B: ImageBuilder + Send + Sync> PlatformService for Deplo
             created_at: now,
             finished_at: None,
             error: None,
+            commit_sha: None,
+            target: Some("production".into()),
         };
         self.store.insert_deployment(deployment.clone())?;
 
