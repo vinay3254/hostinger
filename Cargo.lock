@@ -562,6 +562,7 @@ dependencies = [
  "predicates",
  "rand 0.8.8",
  "redis",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
@@ -571,6 +572,7 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
+ "tokio-stream",
  "tower",
  "url",
  "uuid",
@@ -2712,6 +2714,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
