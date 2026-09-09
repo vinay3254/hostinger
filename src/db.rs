@@ -73,6 +73,10 @@ impl Database {
     pub fn source_events(&self) -> SourceEventRepository<'_> {
         SourceEventRepository::new(DbExecutor::Pool(&self.pool))
     }
+
+    pub fn previews(&self) -> crate::previews::PreviewRepository<'_> {
+        crate::previews::PreviewRepository::new(DbExecutor::Pool(&self.pool))
+    }
 }
 
 pub struct DbTransaction {
@@ -102,6 +106,10 @@ impl DbTransaction {
 
     pub fn source_events(&mut self) -> SourceEventRepository<'_> {
         SourceEventRepository::new(DbExecutor::Tx(&mut self.tx))
+    }
+
+    pub fn previews(&mut self) -> crate::previews::PreviewRepository<'_> {
+        crate::previews::PreviewRepository::new(DbExecutor::Tx(&mut self.tx))
     }
 
     pub async fn commit(self) -> Result<()> {
