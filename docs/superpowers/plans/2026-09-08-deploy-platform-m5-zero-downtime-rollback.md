@@ -71,12 +71,12 @@ pub trait TrafficRouter {
 
 ### Task 4: Add API and dashboard controls
 
-- [ ] **Step 1: Write failing API tests** for release state, health attempts, activate, stop, and rollback authorization.
-- [ ] **Step 2: Add `POST /v1/deployments/:id/rollback`, `GET /v1/deployments/:id/releases`, and `GET /v1/releases/:id/events`.**
-- [ ] **Step 3: Implement live release progress** on deployment detail with traffic/health/drain states.
-- [ ] **Step 4: Implement rollback dialog** with target commit, age, environment, actor confirmation, and failure recovery.
-- [ ] **Step 5: Add E2E tests** for successful zero-downtime deploy and rollback after a failed release.
-- [ ] **Step 6: Run Rust/dashboard checks and commit `feat: add zero downtime dashboard controls`**.
+- [x] **Step 1: Write failing API tests** for release state, health attempts, activate, stop, and rollback authorization.
+- [x] **Step 2: Add `POST /v1/deployments/:id/rollback`, `GET /v1/deployments/:id/releases`, and `GET /v1/releases/:id/events`.**
+- [x] **Step 3: Implement live release progress** on deployment detail with traffic/health/drain states.
+- [x] **Step 4: Implement rollback dialog** with target commit, age, environment, actor confirmation, and failure recovery.
+- [x] **Step 5: Add E2E tests** for successful zero-downtime deploy and rollback after a failed release.
+- [x] **Step 6: Run Rust/dashboard checks and commit `feat: add zero downtime dashboard controls`**.
 
 ## M5 Acceptance Criteria
 
