@@ -137,6 +137,17 @@ pub async fn handle_webhook(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
+    // If the event is a pull request, process through PreviewService
+    if record.pull_request.is_some() {
+        let preview_service =
+            crate::preview_events::PreviewService::new(db.clone(), state.queue.clone());
+        let _ = preview_service
+            .apply_event(&record)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        return Ok(StatusCode::ACCEPTED);
+    }
+
     // If queue is configured, enqueue build job and return 202 ACCEPTED
     if let Some(queue) = &state.queue {
         let priority = match source_event.kind {
