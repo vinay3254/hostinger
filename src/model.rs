@@ -74,6 +74,10 @@ pub struct Deployment {
     #[serde(with = "option_time_rfc3339")]
     pub finished_at: Option<OffsetDateTime>,
     pub error: Option<String>,
+    #[serde(default)]
+    pub commit_sha: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
 }
 
 mod option_time_rfc3339 {
