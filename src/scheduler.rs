@@ -378,4 +378,47 @@ impl Scheduler {
         self.schedule_release(pool, &placement_req, req.lease_duration)
             .await
     }
+
+    pub async fn list_placements_for_node(
+        &self,
+        pool: &PgPool,
+        node_id: Uuid,
+    ) -> Result<Vec<PlacementRecord>, SchedulerError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, release_id, node_id, operation_lease_id, status,
+                   cpu_allocated_millicores, memory_allocated_bytes,
+                   lease_expires_at, created_at, updated_at
+            FROM placements
+            WHERE node_id = $1
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(node_id)
+        .fetch_all(pool)
+        .await?;
+
+        let records = rows
+            .iter()
+            .map(|r| {
+                let status_str: String = r.get("status");
+                let cpu: i64 = r.get("cpu_allocated_millicores");
+                let mem: i64 = r.get("memory_allocated_bytes");
+                PlacementRecord {
+                    id: r.get("id"),
+                    release_id: r.get("release_id"),
+                    node_id: r.get("node_id"),
+                    operation_lease_id: r.get("operation_lease_id"),
+                    status: PlacementStatus::parse(&status_str),
+                    cpu_allocated_millicores: cpu as u64,
+                    memory_allocated_bytes: mem as u64,
+                    lease_expires_at: r.get("lease_expires_at"),
+                    created_at: r.get("created_at"),
+                    updated_at: r.get("updated_at"),
+                }
+            })
+            .collect();
+
+        Ok(records)
+    }
 }
